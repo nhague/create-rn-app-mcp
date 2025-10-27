@@ -388,7 +388,8 @@ create_react_native_project() {
   echo ""
 
   # Create the project
-  npx @react-native-community/cli@latest init "$PROJECT_NAME"
+  # Auto-answer "N" to CocoaPods prompt since we handle it ourselves
+  echo "n" | npx @react-native-community/cli@latest init "$PROJECT_NAME"
 
   print_success "React Native project created!"
 
