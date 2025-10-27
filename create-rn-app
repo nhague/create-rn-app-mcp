@@ -1,0 +1,396 @@
+#!/bin/bash
+
+# ==============================================================================
+# MCP: create-rn-app (Interactive Edition)
+# Author: Nate Hague
+# Description: Scaffolds a new React Native (CLI) project with interactive
+#              configuration, creates a GitHub repository, and syncs them.
+# Usage: create-rn-app "My New Project Name"
+# ==============================================================================
+
+set -e  # Exit on any error
+
+# --- Colors for beautiful output ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# --- Configuration ---
+DEV_DIR="/Users/nate/Documents/development"
+
+# --- Helper Functions ---
+
+print_header() {
+  echo ""
+  echo -e "${CYAN}${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}${BOLD}║                                                            ║${NC}"
+  echo -e "${CYAN}${BOLD}║        🚀 React Native Project Creation MCP 🚀            ║${NC}"
+  echo -e "${CYAN}${BOLD}║                                                            ║${NC}"
+  echo -e "${CYAN}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+}
+
+print_step() {
+  echo -e "${BLUE}➡️  $1${NC}"
+}
+
+print_success() {
+  echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_error() {
+  echo -e "${RED}❌ $1${NC}"
+}
+
+print_warning() {
+  echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_info() {
+  echo -e "${MAGENTA}ℹ️  $1${NC}"
+}
+
+# Cleanup function for rollback
+cleanup_on_error() {
+  if [ -n "$PROJECT_PATH" ] && [ -d "$PROJECT_PATH" ]; then
+    print_warning "Rolling back: Removing incomplete project directory..."
+    rm -rf "$PROJECT_PATH"
+  fi
+
+  if [ -n "$GH_REPO_CREATED" ] && [ "$GH_REPO_CREATED" = "true" ]; then
+    print_warning "Rolling back: Attempting to delete GitHub repository..."
+    gh repo delete "$GH_USERNAME/$PROJECT_NAME" --yes 2>/dev/null || true
+  fi
+
+  print_error "Project creation failed. All changes have been rolled back."
+  exit 1
+}
+
+# Set trap to catch errors
+trap cleanup_on_error ERR
+
+# --- Step 1: Prerequisite Checks ---
+
+check_prerequisites() {
+  print_step "Checking prerequisites..."
+
+  local missing_tools=()
+
+  # Check for required commands
+  for cmd in gh pod npx git; do
+    if ! command -v $cmd &> /dev/null; then
+      missing_tools+=("$cmd")
+    fi
+  done
+
+  if [ ${#missing_tools[@]} -gt 0 ]; then
+    print_error "Missing required tools: ${missing_tools[*]}"
+    echo ""
+    echo "Installation instructions:"
+    for tool in "${missing_tools[@]}"; do
+      case $tool in
+        gh)
+          echo "  - GitHub CLI: brew install gh"
+          ;;
+        pod)
+          echo "  - CocoaPods: sudo gem install cocoapods"
+          ;;
+        npx)
+          echo "  - Node.js (includes npx): brew install node"
+          ;;
+        git)
+          echo "  - Git: brew install git"
+          ;;
+      esac
+    done
+    exit 1
+  fi
+
+  # Check GitHub CLI authentication
+  if ! gh auth status &> /dev/null; then
+    print_error "GitHub CLI is not authenticated."
+    echo ""
+    echo "Please run: gh auth login"
+    exit 1
+  fi
+
+  # Get GitHub username
+  GH_USERNAME=$(gh api user -q .login 2>/dev/null)
+  if [ -z "$GH_USERNAME" ]; then
+    print_error "Could not retrieve GitHub username."
+    exit 1
+  fi
+
+  print_success "All prerequisites met! Logged in as: $GH_USERNAME"
+}
+
+# --- Step 2: Input Validation and Sanitization ---
+
+get_project_name() {
+  if [ -z "$1" ]; then
+    print_error "No project name supplied."
+    echo ""
+    echo "Usage: create-rn-app \"Your Project Name\""
+    exit 1
+  fi
+
+  RAW_PROJECT_NAME="$1"
+
+  # Convert to PascalCase (e.g., "My Cool App" -> "MyCoolApp")
+  PROJECT_NAME=$(echo "$RAW_PROJECT_NAME" | sed 's/[^a-zA-Z0-9]/ /g' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) tolower(substr($i,2))}}1' | sed 's/ //g')
+
+  # Validate first character is a letter (React Native requirement)
+  if ! [[ $PROJECT_NAME =~ ^[A-Za-z] ]]; then
+    print_error "Project name must start with a letter."
+    exit 1
+  fi
+
+  PROJECT_PATH="$DEV_DIR/$PROJECT_NAME"
+
+  # Check if directory already exists
+  if [ -d "$PROJECT_PATH" ]; then
+    print_error "A project directory already exists at: $PROJECT_PATH"
+    exit 1
+  fi
+
+  print_info "Sanitized project name: $PROJECT_NAME"
+}
+
+# --- Step 3: Interactive Configuration ---
+
+ask_user_preferences() {
+  echo ""
+  echo -e "${BOLD}Let's configure your project:${NC}"
+  echo ""
+
+  # Question 1: Repository visibility
+  echo -e "${CYAN}1. GitHub Repository Visibility${NC}"
+  PS3="   Select an option (1-2): "
+  options=("Public (anyone can see)" "Private (only you can see)")
+  select opt in "${options[@]}"; do
+    case $opt in
+      "Public (anyone can see)")
+        REPO_VISIBILITY="public"
+        break
+        ;;
+      "Private (only you can see)")
+        REPO_VISIBILITY="private"
+        break
+        ;;
+      *) echo "Invalid option. Please select 1 or 2.";;
+    esac
+  done
+
+  echo ""
+
+  # Question 2: Install iOS dependencies
+  echo -e "${CYAN}2. iOS Dependencies${NC}"
+  PS3="   Select an option (1-2): "
+  options=("Install iOS pods (recommended for macOS)" "Skip iOS setup")
+  select opt in "${options[@]}"; do
+    case $opt in
+      "Install iOS pods (recommended for macOS)")
+        INSTALL_IOS="true"
+        break
+        ;;
+      "Skip iOS setup")
+        INSTALL_IOS="false"
+        break
+        ;;
+      *) echo "Invalid option. Please select 1 or 2.";;
+    esac
+  done
+
+  echo ""
+
+  # Question 3: Run initial test
+  echo -e "${CYAN}3. Initial Test Run${NC}"
+  PS3="   Select an option (1-2): "
+  options=("Launch app in simulator after setup" "Skip test run (faster)")
+  select opt in "${options[@]}"; do
+    case $opt in
+      "Launch app in simulator after setup")
+        RUN_TEST="true"
+        break
+        ;;
+      "Skip test run (faster)")
+        RUN_TEST="false"
+        break
+        ;;
+      *) echo "Invalid option. Please select 1 or 2.";;
+    esac
+  done
+
+  echo ""
+
+  # Question 4: Add description
+  echo -e "${CYAN}4. Repository Description${NC}"
+  read -p "   Enter a description (optional, press Enter to skip): " REPO_DESCRIPTION
+
+  echo ""
+  echo -e "${BOLD}Configuration Summary:${NC}"
+  echo "  - Project Name:    $PROJECT_NAME"
+  echo "  - Location:        $PROJECT_PATH"
+  echo "  - Visibility:      $REPO_VISIBILITY"
+  echo "  - Install iOS:     $INSTALL_IOS"
+  echo "  - Run Test:        $RUN_TEST"
+  echo "  - Description:     ${REPO_DESCRIPTION:-None}"
+  echo "  - GitHub URL:      https://github.com/$GH_USERNAME/$PROJECT_NAME"
+  echo ""
+
+  read -p "Proceed with these settings? (y/n): " -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    print_warning "Setup cancelled by user."
+    exit 0
+  fi
+}
+
+# --- Step 4: Create React Native Project ---
+
+create_react_native_project() {
+  print_step "[1/6] Navigating to development directory..."
+  cd "$DEV_DIR" || exit 1
+
+  print_step "[2/6] Creating React Native project (this will take a few minutes)..."
+  echo ""
+
+  # Create the project
+  npx @react-native-community/cli@latest init "$PROJECT_NAME"
+
+  print_success "React Native project created!"
+
+  # Navigate into project
+  cd "$PROJECT_PATH" || exit 1
+}
+
+# --- Step 5: Install iOS Dependencies ---
+
+install_ios_dependencies() {
+  if [ "$INSTALL_IOS" = "true" ]; then
+    print_step "[3/6] Installing iOS dependencies with CocoaPods..."
+
+    cd ios || exit 1
+    pod install
+    cd ..
+
+    print_success "iOS dependencies installed!"
+  else
+    print_warning "[3/6] Skipping iOS dependency installation."
+  fi
+}
+
+# --- Step 6: Create GitHub Repository ---
+
+create_github_repo() {
+  print_step "[4/6] Creating GitHub repository..."
+
+  # Build the gh command
+  GH_CMD="gh repo create $PROJECT_NAME --$REPO_VISIBILITY --source=. --remote=origin"
+
+  # Add description if provided
+  if [ -n "$REPO_DESCRIPTION" ]; then
+    GH_CMD="$GH_CMD --description \"$REPO_DESCRIPTION\""
+  fi
+
+  # Execute the command
+  eval $GH_CMD
+
+  GH_REPO_CREATED="true"
+  print_success "GitHub repository created!"
+}
+
+# --- Step 7: Push to GitHub ---
+
+push_to_github() {
+  print_step "[5/6] Syncing with GitHub..."
+
+  # Ensure we're on main branch
+  git branch -M main
+
+  # Push to GitHub
+  git push -u origin main
+
+  print_success "Code pushed to GitHub!"
+}
+
+# --- Step 8: Run Test (Optional) ---
+
+run_initial_test() {
+  if [ "$RUN_TEST" = "true" ]; then
+    print_step "[6/6] Launching app in iOS simulator..."
+    echo ""
+    print_warning "This will open the simulator and start Metro bundler."
+    print_warning "Press Ctrl+C in the Metro window to stop the development server."
+    echo ""
+    sleep 2
+
+    npx react-native run-ios
+  else
+    print_info "[6/6] Skipping initial test run."
+  fi
+}
+
+# --- Step 9: Final Success Message ---
+
+print_final_message() {
+  echo ""
+  echo -e "${GREEN}${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}${BOLD}║                                                            ║${NC}"
+  echo -e "${GREEN}${BOLD}║                    ✅ SUCCESS! ✅                          ║${NC}"
+  echo -e "${GREEN}${BOLD}║                                                            ║${NC}"
+  echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "${BOLD}Your project '$PROJECT_NAME' is ready!${NC}"
+  echo ""
+  echo "📍 Local path:  $PROJECT_PATH"
+  echo "🌐 GitHub URL:  https://github.com/$GH_USERNAME/$PROJECT_NAME"
+  echo ""
+  echo -e "${BOLD}Next steps:${NC}"
+  echo ""
+  echo "  cd $PROJECT_PATH"
+
+  if [ "$INSTALL_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
+    echo "  npx react-native run-ios"
+  fi
+
+  if [ "$INSTALL_IOS" = "false" ]; then
+    echo "  cd ios && pod install && cd .."
+    echo "  npx react-native run-ios"
+  fi
+
+  echo "  npx react-native run-android"
+  echo ""
+  echo -e "${CYAN}Happy coding! 🎉${NC}"
+  echo ""
+}
+
+# ==============================================================================
+# MAIN EXECUTION FLOW
+# ==============================================================================
+
+main() {
+  print_header
+  check_prerequisites
+  get_project_name "$1"
+  ask_user_preferences
+
+  echo ""
+  echo -e "${BOLD}Starting project creation...${NC}"
+  echo ""
+
+  create_react_native_project
+  install_ios_dependencies
+  create_github_repo
+  push_to_github
+  run_initial_test
+  print_final_message
+}
+
+# Run the script
+main "$1"
