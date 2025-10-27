@@ -720,27 +720,22 @@ run_initial_test() {
 
       # Set orientation after launch
       print_info "Setting device orientation to $ORIENTATION..."
-      sleep 3  # Wait for simulator to fully boot
+      sleep 5  # Wait for simulator to fully boot and app to load
 
-      # Get the booted device UDID
-      local DEVICE_UDID=$(xcrun simctl list devices booted | grep -o '[0-9A-F]\{8\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{12\}' | head -1)
-
-      if [ -n "$DEVICE_UDID" ]; then
-        case $ORIENTATION in
-          portrait)
-            xcrun simctl status_bar "$DEVICE_UDID" override --orientation portrait 2>/dev/null || true
-            print_success "Orientation set to portrait"
-            ;;
-          landscape)
-            xcrun simctl status_bar "$DEVICE_UDID" override --orientation landscape 2>/dev/null || true
-            print_success "Orientation set to landscape"
-            ;;
-          both)
-            # Don't override, let it rotate freely
-            print_info "Orientation set to auto-rotate (both orientations allowed)"
-            ;;
-        esac
-      fi
+      case $ORIENTATION in
+        portrait)
+          xcrun simctl ui booted rotate portrait 2>/dev/null || true
+          print_success "Orientation set to portrait"
+          ;;
+        landscape)
+          xcrun simctl ui booted rotate landscapeleft 2>/dev/null || true
+          print_success "Orientation set to landscape left"
+          ;;
+        both)
+          # Don't override, let it rotate freely
+          print_info "Orientation set to auto-rotate (both orientations allowed)"
+          ;;
+      esac
 
     elif [ "$TEST_PLATFORM" = "android" ]; then
       npx react-native run-android
