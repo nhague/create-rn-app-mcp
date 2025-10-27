@@ -397,20 +397,16 @@ create_react_native_project() {
   cd "$PROJECT_PATH" || exit 1
 }
 
-# --- Step 3: Verify iOS Prerequisites ---
+# --- Step 3: Setup iOS Dependencies ---
 
-verify_ios_setup() {
+setup_ios_dependencies() {
   if [ "$SETUP_IOS" = "true" ]; then
-    print_step "[3/7] Verifying iOS setup..."
+    print_step "[3/7] Setting up iOS dependencies (using React Native CLI)..."
 
-    if ! command -v pod &> /dev/null; then
-      print_warning "CocoaPods is not installed."
-      print_info "iOS dependencies will be installed automatically when you run: npx react-native run-ios"
-      print_info "Or install CocoaPods now: sudo gem install cocoapods"
-    else
-      print_success "iOS prerequisites verified!"
-      print_info "iOS dependencies will be installed automatically on first run (via React Native CLI)"
-    fi
+    # Use the modern React Native CLI command instead of calling pod install directly
+    npx react-native setup-ios
+
+    print_success "iOS dependencies installed via React Native CLI!"
   else
     print_info "[3/7] Skipping iOS setup."
   fi
@@ -696,13 +692,14 @@ print_final_message() {
   # Show platform-specific instructions
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
     echo ""
-    echo "  # For iOS (pods install automatically on first run):"
+    echo "  # For iOS:"
+    echo "  npx react-native setup-ios  # Setup iOS dependencies"
     echo "  npx react-native run-ios"
     echo ""
     echo "  # For Android:"
     echo "  npx react-native run-android"
   elif [ "$SETUP_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
-    echo "  npx react-native run-ios  # Pods install automatically!"
+    echo "  npx react-native run-ios  # iOS dependencies already installed!"
   fi
 
   if [ "$SETUP_ANDROID" = "true" ] && [ "$RUN_TEST" = "false" ]; then
@@ -711,7 +708,8 @@ print_final_message() {
 
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "true" ]; then
     echo ""
-    echo "  # To run on iOS later (pods install automatically):"
+    echo "  # To run on iOS later:"
+    echo "  npx react-native setup-ios  # Setup iOS dependencies first"
     echo "  npx react-native run-ios"
   fi
 
@@ -741,7 +739,7 @@ main() {
   echo ""
 
   create_react_native_project
-  verify_ios_setup
+  setup_ios_dependencies
   install_android_dependencies
   configure_platform_settings
   create_github_repo
