@@ -403,10 +403,11 @@ setup_ios_dependencies() {
   if [ "$SETUP_IOS" = "true" ]; then
     print_step "[3/7] Setting up iOS dependencies (using React Native CLI)..."
 
-    # Use the modern React Native CLI command instead of calling pod install directly
+    # Use the official React Native CLI command to setup iOS
+    # This is the modern approach that handles CocoaPods via Bundler
     npx react-native setup-ios
 
-    print_success "iOS dependencies installed via React Native CLI!"
+    print_success "iOS dependencies installed!"
   else
     print_info "[3/7] Skipping iOS setup."
   fi
