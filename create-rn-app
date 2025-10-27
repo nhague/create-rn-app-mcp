@@ -698,7 +698,50 @@ run_initial_test() {
     sleep 2
 
     if [ "$TEST_PLATFORM" = "ios" ]; then
-      npx react-native run-ios
+      # Select the correct device based on device type configuration
+      local SIMULATOR_DEVICE=""
+      case $DEVICE_TYPE in
+        mobile)
+          SIMULATOR_DEVICE="iPhone 16 Pro"
+          print_info "Launching on iPhone 16 Pro (mobile device)..."
+          ;;
+        tablet)
+          SIMULATOR_DEVICE="iPad (10th generation)"
+          print_info "Launching on iPad (10th generation) (tablet device)..."
+          ;;
+        universal)
+          SIMULATOR_DEVICE="iPhone 16 Pro"
+          print_info "Launching on iPhone 16 Pro (universal app, defaulting to phone)..."
+          ;;
+      esac
+
+      # Launch with the correct simulator
+      npx react-native run-ios --simulator="$SIMULATOR_DEVICE"
+
+      # Set orientation after launch
+      print_info "Setting device orientation to $ORIENTATION..."
+      sleep 3  # Wait for simulator to fully boot
+
+      # Get the booted device UDID
+      local DEVICE_UDID=$(xcrun simctl list devices booted | grep -o '[0-9A-F]\{8\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{12\}' | head -1)
+
+      if [ -n "$DEVICE_UDID" ]; then
+        case $ORIENTATION in
+          portrait)
+            xcrun simctl status_bar "$DEVICE_UDID" override --orientation portrait 2>/dev/null || true
+            print_success "Orientation set to portrait"
+            ;;
+          landscape)
+            xcrun simctl status_bar "$DEVICE_UDID" override --orientation landscape 2>/dev/null || true
+            print_success "Orientation set to landscape"
+            ;;
+          both)
+            # Don't override, let it rotate freely
+            print_info "Orientation set to auto-rotate (both orientations allowed)"
+            ;;
+        esac
+      fi
+
     elif [ "$TEST_PLATFORM" = "android" ]; then
       npx react-native run-android
     fi
@@ -726,17 +769,31 @@ print_final_message() {
   echo ""
   echo "  cd $PROJECT_PATH"
 
+  # Determine the correct simulator based on device type
+  local SIMULATOR_CMD=""
+  case $DEVICE_TYPE in
+    mobile)
+      SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPhone 16 Pro\""
+      ;;
+    tablet)
+      SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPad (10th generation)\""
+      ;;
+    universal)
+      SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPhone 16 Pro\""
+      ;;
+  esac
+
   # Show platform-specific instructions
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
     echo ""
     echo "  # For iOS (setup dependencies first):"
     echo "  cd ios && bundle install && bundle exec pod install && cd .."
-    echo "  npx react-native run-ios"
+    echo "  $SIMULATOR_CMD"
     echo ""
     echo "  # For Android:"
     echo "  npx react-native run-android"
   elif [ "$SETUP_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
-    echo "  npx react-native run-ios  # iOS dependencies already installed!"
+    echo "  $SIMULATOR_CMD  # iOS dependencies already installed!"
   fi
 
   if [ "$SETUP_ANDROID" = "true" ] && [ "$RUN_TEST" = "false" ]; then
@@ -747,7 +804,7 @@ print_final_message() {
     echo ""
     echo "  # To run on iOS later (setup dependencies first):"
     echo "  cd ios && bundle install && bundle exec pod install && cd .."
-    echo "  npx react-native run-ios"
+    echo "  $SIMULATOR_CMD"
   fi
 
   if [ "$SETUP_ANDROID" = "false" ] && [ "$SETUP_IOS" = "true" ]; then
