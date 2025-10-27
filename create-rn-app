@@ -397,35 +397,30 @@ create_react_native_project() {
   cd "$PROJECT_PATH" || exit 1
 }
 
-# --- Step 5: Install iOS Dependencies ---
+# --- Step 3: Verify iOS Prerequisites ---
 
-install_ios_dependencies() {
+verify_ios_setup() {
   if [ "$SETUP_IOS" = "true" ]; then
-    print_step "[3/9] Installing iOS dependencies with CocoaPods..."
+    print_step "[3/7] Verifying iOS setup..."
 
     if ! command -v pod &> /dev/null; then
-      print_error "CocoaPods is not installed. Cannot set up iOS."
-      print_info "Install with: sudo gem install cocoapods"
-      print_warning "Skipping iOS setup..."
-      SETUP_IOS="false"
-      return
+      print_warning "CocoaPods is not installed."
+      print_info "iOS dependencies will be installed automatically when you run: npx react-native run-ios"
+      print_info "Or install CocoaPods now: sudo gem install cocoapods"
+    else
+      print_success "iOS prerequisites verified!"
+      print_info "iOS dependencies will be installed automatically on first run (via React Native CLI)"
     fi
-
-    cd ios || exit 1
-    pod install
-    cd ..
-
-    print_success "iOS dependencies installed!"
   else
-    print_info "[3/9] Skipping iOS dependency installation."
+    print_info "[3/7] Skipping iOS setup."
   fi
 }
 
-# --- Step 6: Install Android Dependencies ---
+# --- Step 4: Install Android Dependencies ---
 
 install_android_dependencies() {
   if [ "$SETUP_ANDROID" = "true" ]; then
-    print_step "[4/9] Pre-downloading Android dependencies..."
+    print_step "[4/7] Pre-downloading Android dependencies..."
 
     # Check for Android environment
     if [ -z "$ANDROID_HOME" ] && [ -z "$ANDROID_SDK_ROOT" ]; then
@@ -455,15 +450,17 @@ install_android_dependencies() {
 
     print_success "Android dependencies pre-downloaded!"
   else
-    print_info "[4/9] Skipping Android dependency installation."
+    print_info "[4/7] Skipping Android dependency installation."
   fi
 }
 
-# --- Step 5: Configure iOS Device and Orientation ---
+# --- Step 5: Configure Platform Settings ---
 
-configure_ios_settings() {
+configure_platform_settings() {
+  print_step "[5/7] Configuring platform settings..."
+
+  # Configure iOS if selected
   if [ "$SETUP_IOS" = "true" ]; then
-    print_step "[5/9] Configuring iOS device type and orientation..."
 
     local PLIST_PATH="$PROJECT_PATH/ios/$PROJECT_NAME/Info.plist"
 
@@ -541,17 +538,11 @@ configure_ios_settings() {
         ;;
     esac
 
-    print_success "iOS settings configured!"
-  else
-    print_info "[5/9] Skipping iOS configuration."
+    print_info "iOS settings configured!"
   fi
-}
 
-# --- Step 6: Configure Android Device and Orientation ---
-
-configure_android_settings() {
+  # Configure Android if selected
   if [ "$SETUP_ANDROID" = "true" ]; then
-    print_step "[6/9] Configuring Android device type and orientation..."
 
     local MANIFEST_PATH="$PROJECT_PATH/android/app/src/main/AndroidManifest.xml"
 
@@ -622,16 +613,16 @@ configure_android_settings() {
     # Clean up backup files
     rm -f "$MANIFEST_PATH.bak"
 
-    print_success "Android settings configured!"
-  else
-    print_info "[6/9] Skipping Android configuration."
+    print_info "Android settings configured!"
   fi
+
+  print_success "Platform settings configured!"
 }
 
-# --- Step 7: Create GitHub Repository ---
+# --- Step 6: Create GitHub Repository ---
 
 create_github_repo() {
-  print_step "[7/9] Creating GitHub repository..."
+  print_step "[6/7] Creating GitHub repository..."
 
   # Build the gh command
   GH_CMD="gh repo create $PROJECT_NAME --$REPO_VISIBILITY --source=. --remote=origin"
@@ -648,10 +639,10 @@ create_github_repo() {
   print_success "GitHub repository created!"
 }
 
-# --- Step 8: Push to GitHub ---
+# --- Step 7: Push to GitHub ---
 
 push_to_github() {
-  print_step "[8/9] Syncing with GitHub..."
+  print_step "[7/7] Syncing with GitHub..."
 
   # Ensure we're on main branch
   git branch -M main
@@ -662,11 +653,11 @@ push_to_github() {
   print_success "Code pushed to GitHub!"
 }
 
-# --- Step 9: Run Test (Optional) ---
+# --- Optional: Run Test ---
 
 run_initial_test() {
   if [ "$RUN_TEST" = "true" ] && [ "$TEST_PLATFORM" != "none" ]; then
-    print_step "[9/9] Launching app on $TEST_PLATFORM..."
+    print_step "Launching app on $TEST_PLATFORM..."
     echo ""
     print_warning "This will start Metro bundler and launch the app."
     print_warning "Press Ctrl+C in the Metro window to stop the development server."
@@ -679,11 +670,11 @@ run_initial_test() {
       npx react-native run-android
     fi
   else
-    print_info "[9/9] Skipping initial test run."
+    print_info "Skipping initial test run."
   fi
 }
 
-# --- Step 10: Final Success Message ---
+# --- Final Success Message ---
 
 print_final_message() {
   echo ""
@@ -705,14 +696,13 @@ print_final_message() {
   # Show platform-specific instructions
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
     echo ""
-    echo "  # For iOS:"
-    echo "  cd ios && pod install && cd .."
+    echo "  # For iOS (pods install automatically on first run):"
     echo "  npx react-native run-ios"
     echo ""
     echo "  # For Android:"
     echo "  npx react-native run-android"
   elif [ "$SETUP_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
-    echo "  npx react-native run-ios"
+    echo "  npx react-native run-ios  # Pods install automatically!"
   fi
 
   if [ "$SETUP_ANDROID" = "true" ] && [ "$RUN_TEST" = "false" ]; then
@@ -721,8 +711,7 @@ print_final_message() {
 
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "true" ]; then
     echo ""
-    echo "  # To set up iOS later:"
-    echo "  cd ios && pod install && cd .."
+    echo "  # To run on iOS later (pods install automatically):"
     echo "  npx react-native run-ios"
   fi
 
@@ -752,10 +741,9 @@ main() {
   echo ""
 
   create_react_native_project
-  install_ios_dependencies
+  verify_ios_setup
   install_android_dependencies
-  configure_ios_settings
-  configure_android_settings
+  configure_platform_settings
   create_github_repo
   push_to_github
   run_initial_test
