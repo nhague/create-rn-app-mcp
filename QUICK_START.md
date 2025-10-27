@@ -28,10 +28,10 @@ Answer 4 simple questions, and you're done!
 ## What It Does
 
 1. ✅ Creates React Native CLI project
-2. ✅ Installs iOS dependencies
+2. ✅ Installs iOS and/or Android dependencies
 3. ✅ Creates GitHub repository
 4. ✅ Pushes your code
-5. ✅ Opens in simulator (optional)
+5. ✅ Opens in simulator/emulator (optional)
 
 ---
 
@@ -42,11 +42,11 @@ $ create-rn-app "Food App"
 
 # Select options:
 1. Repository Visibility: Private
-2. iOS Dependencies: Yes
-3. Initial Test Run: No
+2. Platform Setup: Both iOS and Android
+3. Initial Test Run: Yes (iOS simulator)
 4. Description: A food delivery app
 
-# Wait 3 minutes...
+# Wait 3-5 minutes...
 
 ✅ Done! Project created and synced to GitHub.
 ```

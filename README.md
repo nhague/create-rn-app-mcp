@@ -1,8 +1,8 @@
 # React Native Project Creation MCP 🚀
 
 **Author:** Nate Hague
-**Version:** 1.0.0
-**Description:** An interactive command-line tool that automates the complete workflow of creating a React Native (CLI) project, setting up GitHub repository, and syncing them together.
+**Version:** 1.1.0
+**Description:** An interactive command-line tool that automates the complete workflow of creating a React Native (CLI) project with iOS and Android support, setting up GitHub repository, and syncing them together.
 
 ---
 
@@ -39,9 +39,9 @@ This MCP (Master Control Program) automates the entire process of creating a pro
 
 ## 🔧 Prerequisites
 
-Before installing, make sure you have these tools installed on your Mac:
+Before installing, make sure you have these tools installed:
 
-### Required Tools
+### Required Tools (All Platforms)
 
 1. **Node.js & npm**
    ```bash
@@ -61,7 +61,9 @@ Before installing, make sure you have these tools installed on your Mac:
    gh auth login
    ```
 
-5. **CocoaPods** (for iOS development)
+### iOS Development (Optional)
+
+5. **CocoaPods**
    ```bash
    sudo gem install cocoapods
    ```
@@ -72,12 +74,41 @@ Before installing, make sure you have these tools installed on your Mac:
      xcode-select --install
      ```
 
+### Android Development (Optional)
+
+7. **Java Development Kit (JDK)**
+   ```bash
+   brew install openjdk@11
+   ```
+
+8. **Android Studio**
+   - Download from https://developer.android.com/studio
+   - Follow the React Native setup guide: https://reactnative.dev/docs/environment-setup
+   - Install Android SDK
+   - Set up ANDROID_HOME environment variable:
+     ```bash
+     # Add to ~/.zshrc or ~/.bash_profile
+     export ANDROID_HOME=$HOME/Library/Android/sdk
+     export PATH=$PATH:$ANDROID_HOME/emulator
+     export PATH=$PATH:$ANDROID_HOME/platform-tools
+     ```
+
 ### Verify Prerequisites
 
-Run this command to check if everything is installed:
+Run this command to check if core tools are installed:
 
 ```bash
-command -v node && command -v npx && command -v git && command -v gh && command -v pod && echo "✅ All prerequisites met!"
+command -v node && command -v npx && command -v git && command -v gh && echo "✅ Core tools installed!"
+```
+
+To check platform-specific tools:
+
+```bash
+# For iOS
+command -v pod && echo "✅ iOS tools ready!"
+
+# For Android
+echo $ANDROID_HOME && command -v java && echo "✅ Android tools ready!"
 ```
 
 ---
@@ -130,12 +161,14 @@ When you run the command, you'll be asked to configure:
    - Public (anyone can see)
    - Private (only you can see)
 
-2. **iOS Dependencies**
-   - Install iOS pods (recommended for macOS)
-   - Skip iOS setup (for Linux/Windows or Android-only)
+2. **Platform Setup**
+   - iOS only (install CocoaPods)
+   - Android only (pre-download dependencies)
+   - Both iOS and Android (recommended)
+   - Skip platform setup
 
 3. **Initial Test Run**
-   - Launch app in simulator after setup
+   - Launch app after setup (asks which platform if both are set up)
    - Skip test run (faster)
 
 4. **Repository Description**
@@ -149,7 +182,7 @@ $ create-rn-app "Food Delivery App"
 🚀 React Native Project Creation MCP 🚀
 
 ➡️  Checking prerequisites...
-✅ All prerequisites met! Logged in as: nhague
+✅ All required tools installed! Logged in as: nhague
 
 ℹ️  Sanitized project name: FoodDeliveryApp
 
@@ -160,15 +193,22 @@ Let's configure your project:
    2) Private (only you can see)
    Select an option (1-2): 2
 
-2. iOS Dependencies
-   1) Install iOS pods (recommended for macOS)
-   2) Skip iOS setup
-   Select an option (1-2): 1
+2. Platform Setup
+   1) iOS only (install CocoaPods)
+   2) Android only (pre-download dependencies)
+   3) Both iOS and Android (recommended)
+   4) Skip platform setup
+   Select an option (1-4): 3
 
 3. Initial Test Run
-   1) Launch app in simulator after setup
+   1) Launch app after setup
    2) Skip test run (faster)
-   Select an option (1-2): 2
+   Select an option (1-2): 1
+
+   Which platform to test?
+   1) iOS simulator
+   2) Android emulator
+   Select platform (1-2): 1
 
 4. Repository Description
    Enter a description (optional): A food delivery mobile app
@@ -177,8 +217,10 @@ Configuration Summary:
   - Project Name:    FoodDeliveryApp
   - Location:        /Users/nate/Documents/development/FoodDeliveryApp
   - Visibility:      private
-  - Install iOS:     true
-  - Run Test:        false
+  - Setup iOS:       true
+  - Setup Android:   true
+  - Run Test:        true
+  - Test Platform:   ios
   - Description:     A food delivery mobile app
   - GitHub URL:      https://github.com/nhague/FoodDeliveryApp
 
@@ -192,6 +234,12 @@ Your project 'FoodDeliveryApp' is ready!
 
 📍 Local path:  /Users/nate/Documents/development/FoodDeliveryApp
 🌐 GitHub URL:  https://github.com/nhague/FoodDeliveryApp
+
+Next steps:
+
+  cd /Users/nate/Documents/development/FoodDeliveryApp
+  npx react-native run-ios
+  npx react-native run-android
 ```
 
 ---
@@ -406,6 +454,28 @@ Open an issue or submit a pull request!
 ## 📄 License
 
 MIT License - Feel free to use, modify, and distribute.
+
+---
+
+## 📝 Changelog
+
+### Version 1.1.0 (Latest)
+**Added Android Support**
+- ✨ Platform selection: Choose iOS only, Android only, or both
+- ✨ Android prerequisite checks (ANDROID_HOME, Java/JDK)
+- ✨ Android dependency pre-download via Gradle
+- ✨ Platform-specific test runner (choose iOS simulator or Android emulator)
+- 📚 Updated documentation with Android setup instructions
+- 🎨 Improved configuration summary with platform details
+
+### Version 1.0.0
+**Initial Release**
+- 🚀 Interactive React Native project creation
+- 📦 iOS CocoaPods installation
+- 🐙 Automatic GitHub repository creation and sync
+- 🛡️ Bulletproof error handling with rollback
+- 🎨 Beautiful color-coded CLI interface
+- ✅ Optional test run in iOS simulator
 
 ---
 

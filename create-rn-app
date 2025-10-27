@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# MCP: create-rn-app (Interactive Edition)
+# MCP: create-rn-app (Interactive Edition with Android Support)
 # Author: Nate Hague
 # Description: Scaffolds a new React Native (CLI) project with interactive
 #              configuration, creates a GitHub repository, and syncs them.
@@ -80,9 +80,11 @@ check_prerequisites() {
   print_step "Checking prerequisites..."
 
   local missing_tools=()
+  local android_warnings=()
+  local ios_warnings=()
 
   # Check for required commands
-  for cmd in gh pod npx git; do
+  for cmd in gh npx git; do
     if ! command -v $cmd &> /dev/null; then
       missing_tools+=("$cmd")
     fi
@@ -97,9 +99,6 @@ check_prerequisites() {
         gh)
           echo "  - GitHub CLI: brew install gh"
           ;;
-        pod)
-          echo "  - CocoaPods: sudo gem install cocoapods"
-          ;;
         npx)
           echo "  - Node.js (includes npx): brew install node"
           ;;
@@ -109,6 +108,20 @@ check_prerequisites() {
       esac
     done
     exit 1
+  fi
+
+  # Check iOS prerequisites (optional - warnings only)
+  if ! command -v pod &> /dev/null; then
+    ios_warnings+=("CocoaPods not installed (required for iOS development)")
+  fi
+
+  # Check Android prerequisites (optional - warnings only)
+  if [ -z "$ANDROID_HOME" ] && [ -z "$ANDROID_SDK_ROOT" ]; then
+    android_warnings+=("ANDROID_HOME not set (required for Android development)")
+  fi
+
+  if ! command -v java &> /dev/null; then
+    android_warnings+=("Java/JDK not installed (required for Android development)")
   fi
 
   # Check GitHub CLI authentication
@@ -126,7 +139,26 @@ check_prerequisites() {
     exit 1
   fi
 
-  print_success "All prerequisites met! Logged in as: $GH_USERNAME"
+  print_success "All required tools installed! Logged in as: $GH_USERNAME"
+
+  # Show platform-specific warnings
+  if [ ${#ios_warnings[@]} -gt 0 ]; then
+    echo ""
+    print_warning "iOS Development Setup:"
+    for warning in "${ios_warnings[@]}"; do
+      echo "  - $warning"
+    done
+    echo "  Install: sudo gem install cocoapods"
+  fi
+
+  if [ ${#android_warnings[@]} -gt 0 ]; then
+    echo ""
+    print_warning "Android Development Setup:"
+    for warning in "${android_warnings[@]}"; do
+      echo "  - $warning"
+    done
+    echo "  See: https://reactnative.dev/docs/environment-setup"
+  fi
 }
 
 # --- Step 2: Input Validation and Sanitization ---
@@ -188,21 +220,33 @@ ask_user_preferences() {
 
   echo ""
 
-  # Question 2: Install iOS dependencies
-  echo -e "${CYAN}2. iOS Dependencies${NC}"
-  PS3="   Select an option (1-2): "
-  options=("Install iOS pods (recommended for macOS)" "Skip iOS setup")
+  # Question 2: Platform Setup
+  echo -e "${CYAN}2. Platform Setup${NC}"
+  PS3="   Select an option (1-4): "
+  options=("iOS only (install CocoaPods)" "Android only (pre-download dependencies)" "Both iOS and Android (recommended)" "Skip platform setup")
   select opt in "${options[@]}"; do
     case $opt in
-      "Install iOS pods (recommended for macOS)")
-        INSTALL_IOS="true"
+      "iOS only (install CocoaPods)")
+        SETUP_IOS="true"
+        SETUP_ANDROID="false"
         break
         ;;
-      "Skip iOS setup")
-        INSTALL_IOS="false"
+      "Android only (pre-download dependencies)")
+        SETUP_IOS="false"
+        SETUP_ANDROID="true"
         break
         ;;
-      *) echo "Invalid option. Please select 1 or 2.";;
+      "Both iOS and Android (recommended)")
+        SETUP_IOS="true"
+        SETUP_ANDROID="true"
+        break
+        ;;
+      "Skip platform setup")
+        SETUP_IOS="false"
+        SETUP_ANDROID="false"
+        break
+        ;;
+      *) echo "Invalid option. Please select 1-4.";;
     esac
   done
 
@@ -211,15 +255,42 @@ ask_user_preferences() {
   # Question 3: Run initial test
   echo -e "${CYAN}3. Initial Test Run${NC}"
   PS3="   Select an option (1-2): "
-  options=("Launch app in simulator after setup" "Skip test run (faster)")
+  options=("Launch app after setup" "Skip test run (faster)")
   select opt in "${options[@]}"; do
     case $opt in
-      "Launch app in simulator after setup")
+      "Launch app after setup")
         RUN_TEST="true"
+        # Ask which platform if both are set up
+        if [ "$SETUP_IOS" = "true" ] && [ "$SETUP_ANDROID" = "true" ]; then
+          echo ""
+          echo "   Which platform to test?"
+          PS3="   Select platform (1-2): "
+          test_options=("iOS simulator" "Android emulator")
+          select test_opt in "${test_options[@]}"; do
+            case $test_opt in
+              "iOS simulator")
+                TEST_PLATFORM="ios"
+                break
+                ;;
+              "Android emulator")
+                TEST_PLATFORM="android"
+                break
+                ;;
+              *) echo "Invalid option. Please select 1 or 2.";;
+            esac
+          done
+        elif [ "$SETUP_IOS" = "true" ]; then
+          TEST_PLATFORM="ios"
+        elif [ "$SETUP_ANDROID" = "true" ]; then
+          TEST_PLATFORM="android"
+        else
+          TEST_PLATFORM="none"
+        fi
         break
         ;;
       "Skip test run (faster)")
         RUN_TEST="false"
+        TEST_PLATFORM="none"
         break
         ;;
       *) echo "Invalid option. Please select 1 or 2.";;
@@ -237,8 +308,12 @@ ask_user_preferences() {
   echo "  - Project Name:    $PROJECT_NAME"
   echo "  - Location:        $PROJECT_PATH"
   echo "  - Visibility:      $REPO_VISIBILITY"
-  echo "  - Install iOS:     $INSTALL_IOS"
+  echo "  - Setup iOS:       $SETUP_IOS"
+  echo "  - Setup Android:   $SETUP_ANDROID"
   echo "  - Run Test:        $RUN_TEST"
+  if [ "$RUN_TEST" = "true" ]; then
+    echo "  - Test Platform:   $TEST_PLATFORM"
+  fi
   echo "  - Description:     ${REPO_DESCRIPTION:-None}"
   echo "  - GitHub URL:      https://github.com/$GH_USERNAME/$PROJECT_NAME"
   echo ""
@@ -254,10 +329,10 @@ ask_user_preferences() {
 # --- Step 4: Create React Native Project ---
 
 create_react_native_project() {
-  print_step "[1/6] Navigating to development directory..."
+  print_step "[1/7] Navigating to development directory..."
   cd "$DEV_DIR" || exit 1
 
-  print_step "[2/6] Creating React Native project (this will take a few minutes)..."
+  print_step "[2/7] Creating React Native project (this will take a few minutes)..."
   echo ""
 
   # Create the project
@@ -272,8 +347,16 @@ create_react_native_project() {
 # --- Step 5: Install iOS Dependencies ---
 
 install_ios_dependencies() {
-  if [ "$INSTALL_IOS" = "true" ]; then
-    print_step "[3/6] Installing iOS dependencies with CocoaPods..."
+  if [ "$SETUP_IOS" = "true" ]; then
+    print_step "[3/7] Installing iOS dependencies with CocoaPods..."
+
+    if ! command -v pod &> /dev/null; then
+      print_error "CocoaPods is not installed. Cannot set up iOS."
+      print_info "Install with: sudo gem install cocoapods"
+      print_warning "Skipping iOS setup..."
+      SETUP_IOS="false"
+      return
+    fi
 
     cd ios || exit 1
     pod install
@@ -281,14 +364,52 @@ install_ios_dependencies() {
 
     print_success "iOS dependencies installed!"
   else
-    print_warning "[3/6] Skipping iOS dependency installation."
+    print_info "[3/7] Skipping iOS dependency installation."
   fi
 }
 
-# --- Step 6: Create GitHub Repository ---
+# --- Step 6: Install Android Dependencies ---
+
+install_android_dependencies() {
+  if [ "$SETUP_ANDROID" = "true" ]; then
+    print_step "[4/7] Pre-downloading Android dependencies..."
+
+    # Check for Android environment
+    if [ -z "$ANDROID_HOME" ] && [ -z "$ANDROID_SDK_ROOT" ]; then
+      print_error "ANDROID_HOME is not set. Cannot set up Android."
+      print_info "See: https://reactnative.dev/docs/environment-setup"
+      print_warning "Skipping Android setup..."
+      SETUP_ANDROID="false"
+      return
+    fi
+
+    if ! command -v java &> /dev/null; then
+      print_error "Java is not installed. Cannot set up Android."
+      print_info "Install JDK 11 or later"
+      print_warning "Skipping Android setup..."
+      SETUP_ANDROID="false"
+      return
+    fi
+
+    cd android || exit 1
+
+    # Run Gradle tasks to download dependencies
+    print_info "Running Gradle dependency resolution (this may take a while)..."
+    ./gradlew --version > /dev/null 2>&1 || true
+    ./gradlew tasks > /dev/null 2>&1 || true
+
+    cd ..
+
+    print_success "Android dependencies pre-downloaded!"
+  else
+    print_info "[4/7] Skipping Android dependency installation."
+  fi
+}
+
+# --- Step 7: Create GitHub Repository ---
 
 create_github_repo() {
-  print_step "[4/6] Creating GitHub repository..."
+  print_step "[5/7] Creating GitHub repository..."
 
   # Build the gh command
   GH_CMD="gh repo create $PROJECT_NAME --$REPO_VISIBILITY --source=. --remote=origin"
@@ -305,10 +426,10 @@ create_github_repo() {
   print_success "GitHub repository created!"
 }
 
-# --- Step 7: Push to GitHub ---
+# --- Step 8: Push to GitHub ---
 
 push_to_github() {
-  print_step "[5/6] Syncing with GitHub..."
+  print_step "[6/7] Syncing with GitHub..."
 
   # Ensure we're on main branch
   git branch -M main
@@ -319,24 +440,28 @@ push_to_github() {
   print_success "Code pushed to GitHub!"
 }
 
-# --- Step 8: Run Test (Optional) ---
+# --- Step 9: Run Test (Optional) ---
 
 run_initial_test() {
-  if [ "$RUN_TEST" = "true" ]; then
-    print_step "[6/6] Launching app in iOS simulator..."
+  if [ "$RUN_TEST" = "true" ] && [ "$TEST_PLATFORM" != "none" ]; then
+    print_step "[7/7] Launching app on $TEST_PLATFORM..."
     echo ""
-    print_warning "This will open the simulator and start Metro bundler."
+    print_warning "This will start Metro bundler and launch the app."
     print_warning "Press Ctrl+C in the Metro window to stop the development server."
     echo ""
     sleep 2
 
-    npx react-native run-ios
+    if [ "$TEST_PLATFORM" = "ios" ]; then
+      npx react-native run-ios
+    elif [ "$TEST_PLATFORM" = "android" ]; then
+      npx react-native run-android
+    fi
   else
-    print_info "[6/6] Skipping initial test run."
+    print_info "[7/7] Skipping initial test run."
   fi
 }
 
-# --- Step 9: Final Success Message ---
+# --- Step 10: Final Success Message ---
 
 print_final_message() {
   echo ""
@@ -355,16 +480,36 @@ print_final_message() {
   echo ""
   echo "  cd $PROJECT_PATH"
 
-  if [ "$INSTALL_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
+  # Show platform-specific instructions
+  if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
+    echo ""
+    echo "  # For iOS:"
+    echo "  cd ios && pod install && cd .."
+    echo "  npx react-native run-ios"
+    echo ""
+    echo "  # For Android:"
+    echo "  npx react-native run-android"
+  elif [ "$SETUP_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
     echo "  npx react-native run-ios"
   fi
 
-  if [ "$INSTALL_IOS" = "false" ]; then
+  if [ "$SETUP_ANDROID" = "true" ] && [ "$RUN_TEST" = "false" ]; then
+    echo "  npx react-native run-android"
+  fi
+
+  if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "true" ]; then
+    echo ""
+    echo "  # To set up iOS later:"
     echo "  cd ios && pod install && cd .."
     echo "  npx react-native run-ios"
   fi
 
-  echo "  npx react-native run-android"
+  if [ "$SETUP_ANDROID" = "false" ] && [ "$SETUP_IOS" = "true" ]; then
+    echo ""
+    echo "  # To run on Android later:"
+    echo "  npx react-native run-android"
+  fi
+
   echo ""
   echo -e "${CYAN}Happy coding! 🎉${NC}"
   echo ""
@@ -386,6 +531,7 @@ main() {
 
   create_react_native_project
   install_ios_dependencies
+  install_android_dependencies
   create_github_repo
   push_to_github
   run_initial_test
