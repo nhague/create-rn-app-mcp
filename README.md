@@ -1,8 +1,8 @@
 # React Native Project Creation MCP 🚀
 
 **Author:** Nate Hague
-**Version:** 1.1.0
-**Description:** An interactive command-line tool that automates the complete workflow of creating a React Native (CLI) project with iOS and Android support, setting up GitHub repository, and syncing them together.
+**Version:** 1.2.0
+**Description:** An interactive command-line tool that automates the complete workflow of creating a React Native (CLI) project with iOS and Android support, device type targeting, orientation configuration, setting up GitHub repository, and syncing them together.
 
 ---
 
@@ -167,11 +167,21 @@ When you run the command, you'll be asked to configure:
    - Both iOS and Android (recommended)
    - Skip platform setup
 
-3. **Initial Test Run**
+3. **Device Type** (NEW!)
+   - Mobile/Phone only
+   - Tablet only
+   - Universal (Mobile + Tablet)
+
+4. **Screen Orientation** (NEW!)
+   - Portrait only
+   - Landscape only
+   - Both orientations
+
+5. **Initial Test Run**
    - Launch app after setup (asks which platform if both are set up)
    - Skip test run (faster)
 
-4. **Repository Description**
+6. **Repository Description**
    - Optional description for your GitHub repo
 
 ### Example Session
@@ -459,7 +469,16 @@ MIT License - Feel free to use, modify, and distribute.
 
 ## 📝 Changelog
 
-### Version 1.1.0 (Latest)
+### Version 1.2.0 (Latest)
+**Added Device Type & Orientation Configuration**
+- ✨ Device type selection: Mobile/Phone only, Tablet only, or Universal
+- ✨ Orientation selection: Portrait only, Landscape only, or Both
+- ✨ Automatic iOS Info.plist configuration for device targeting
+- ✨ Automatic Android AndroidManifest.xml configuration
+- ✨ Green ticks (✓) and red crosses (✗) in configuration summary
+- 📚 Comprehensive device/orientation guide documentation
+
+### Version 1.1.0
 **Added Android Support**
 - ✨ Platform selection: Choose iOS only, Android only, or both
 - ✨ Android prerequisite checks (ANDROID_HOME, Java/JDK)
