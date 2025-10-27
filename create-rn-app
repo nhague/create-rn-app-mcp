@@ -136,12 +136,12 @@ check_prerequisites() {
   fi
 
   # Check iOS prerequisites (optional - warnings only)
-  if ! command -v bundle &> /dev/null; then
-    ios_warnings+=("Bundler not installed (required for iOS development)")
-  fi
-
   if ! command -v pod &> /dev/null; then
     ios_warnings+=("CocoaPods not installed (required for iOS development)")
+  fi
+
+  if ! command -v bundle &> /dev/null; then
+    ios_warnings+=("Bundler not installed (recommended for iOS, but optional)")
   fi
 
   # Check Android prerequisites (optional - warnings only)
@@ -405,20 +405,45 @@ create_react_native_project() {
 
 setup_ios_dependencies() {
   if [ "$SETUP_IOS" = "true" ]; then
-    print_step "[3/7] Setting up iOS dependencies (modern approach with Bundler)..."
+    print_step "[3/7] Setting up iOS dependencies..."
 
     cd ios || exit 1
 
-    # Modern approach: Use Bundler to manage CocoaPods
-    # This is what React Native CLI officially recommends
-    print_info "Installing Ruby dependencies via Bundler (one-time setup)..."
-    bundle install
+    # Try the modern approach first (Bundler + CocoaPods)
+    if command -v bundle &> /dev/null; then
+      print_info "Attempting to use Bundler (modern approach)..."
 
-    print_info "Installing CocoaPods dependencies..."
-    bundle exec pod install
+      if bundle install 2>/dev/null && bundle exec pod install 2>/dev/null; then
+        print_success "iOS dependencies installed via Bundler!"
+      else
+        print_warning "Bundler installation failed (likely system Ruby compatibility issue)."
+        print_info "Falling back to direct pod install..."
+
+        # Fallback to direct pod install
+        if pod install; then
+          print_success "iOS dependencies installed via CocoaPods!"
+          print_warning "Note: Direct pod install may show deprecation warnings. Consider updating Ruby."
+        else
+          print_error "Failed to install iOS dependencies."
+          cd ..
+          exit 1
+        fi
+      fi
+    else
+      # No bundler available, use direct pod install
+      print_info "Bundler not available. Using direct pod install..."
+
+      if pod install; then
+        print_success "iOS dependencies installed via CocoaPods!"
+        print_info "Tip: Install bundler for better dependency management: gem install bundler"
+      else
+        print_error "Failed to install iOS dependencies."
+        cd ..
+        exit 1
+      fi
+    fi
 
     cd ..
-    print_success "iOS dependencies installed!"
   else
     print_info "[3/7] Skipping iOS setup."
   fi
