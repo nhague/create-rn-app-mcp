@@ -136,6 +136,10 @@ check_prerequisites() {
   fi
 
   # Check iOS prerequisites (optional - warnings only)
+  if ! command -v bundle &> /dev/null; then
+    ios_warnings+=("Bundler not installed (required for iOS development)")
+  fi
+
   if ! command -v pod &> /dev/null; then
     ios_warnings+=("CocoaPods not installed (required for iOS development)")
   fi
@@ -401,12 +405,19 @@ create_react_native_project() {
 
 setup_ios_dependencies() {
   if [ "$SETUP_IOS" = "true" ]; then
-    print_step "[3/7] Setting up iOS dependencies (using React Native CLI)..."
+    print_step "[3/7] Setting up iOS dependencies (modern approach with Bundler)..."
 
-    # Use the official React Native CLI command to setup iOS
-    # This is the modern approach that handles CocoaPods via Bundler
-    npx react-native setup-ios
+    cd ios || exit 1
 
+    # Modern approach: Use Bundler to manage CocoaPods
+    # This is what React Native CLI officially recommends
+    print_info "Installing Ruby dependencies via Bundler (one-time setup)..."
+    bundle install
+
+    print_info "Installing CocoaPods dependencies..."
+    bundle exec pod install
+
+    cd ..
     print_success "iOS dependencies installed!"
   else
     print_info "[3/7] Skipping iOS setup."
@@ -693,8 +704,8 @@ print_final_message() {
   # Show platform-specific instructions
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
     echo ""
-    echo "  # For iOS:"
-    echo "  npx react-native setup-ios  # Setup iOS dependencies"
+    echo "  # For iOS (setup dependencies first):"
+    echo "  cd ios && bundle install && bundle exec pod install && cd .."
     echo "  npx react-native run-ios"
     echo ""
     echo "  # For Android:"
@@ -709,8 +720,8 @@ print_final_message() {
 
   if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "true" ]; then
     echo ""
-    echo "  # To run on iOS later:"
-    echo "  npx react-native setup-ios  # Setup iOS dependencies first"
+    echo "  # To run on iOS later (setup dependencies first):"
+    echo "  cd ios && bundle install && bundle exec pod install && cd .."
     echo "  npx react-native run-ios"
   fi
 
