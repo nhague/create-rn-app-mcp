@@ -55,6 +55,26 @@ print_info() {
   echo -e "${MAGENTA}ℹ️  $1${NC}"
 }
 
+# Helper function for auto-advancing menu selection
+ask_option() {
+  local prompt="$1"
+  local max_option="$2"
+  local choice
+
+  while true; do
+    read -n 1 -p "$prompt" choice
+    echo ""  # New line after input
+
+    # Validate input
+    if [[ "$choice" =~ ^[1-9]$ ]] && [ "$choice" -le "$max_option" ]; then
+      echo "$choice"
+      return
+    else
+      print_error "Invalid option. Please select 1-$max_option."
+    fi
+  done
+}
+
 # Cleanup function for rollback
 cleanup_on_error() {
   if [ -n "$PROJECT_PATH" ] && [ -d "$PROJECT_PATH" ]; then
@@ -202,148 +222,110 @@ ask_user_preferences() {
 
   # Question 1: Repository visibility
   echo -e "${CYAN}1. GitHub Repository Visibility${NC}"
-  PS3="   Select an option (1-2): "
-  options=("Public (anyone can see)" "Private (only you can see)")
-  select opt in "${options[@]}"; do
-    case $opt in
-      "Public (anyone can see)")
-        REPO_VISIBILITY="public"
-        break
-        ;;
-      "Private (only you can see)")
-        REPO_VISIBILITY="private"
-        break
-        ;;
-      *) echo "Invalid option. Please select 1 or 2.";;
-    esac
-  done
+  echo "   1) Public (anyone can see)"
+  echo "   2) Private (only you can see)"
+  choice=$(ask_option "   Select an option (1-2): " 2)
+
+  case $choice in
+    1) REPO_VISIBILITY="public" ;;
+    2) REPO_VISIBILITY="private" ;;
+  esac
 
   echo ""
 
   # Question 2: Platform Setup
   echo -e "${CYAN}2. Platform Setup${NC}"
-  PS3="   Select an option (1-4): "
-  options=("iOS only (install CocoaPods)" "Android only (pre-download dependencies)" "Both iOS and Android (recommended)" "Skip platform setup")
-  select opt in "${options[@]}"; do
-    case $opt in
-      "iOS only (install CocoaPods)")
-        SETUP_IOS="true"
-        SETUP_ANDROID="false"
-        break
-        ;;
-      "Android only (pre-download dependencies)")
-        SETUP_IOS="false"
-        SETUP_ANDROID="true"
-        break
-        ;;
-      "Both iOS and Android (recommended)")
-        SETUP_IOS="true"
-        SETUP_ANDROID="true"
-        break
-        ;;
-      "Skip platform setup")
-        SETUP_IOS="false"
-        SETUP_ANDROID="false"
-        break
-        ;;
-      *) echo "Invalid option. Please select 1-4.";;
-    esac
-  done
+  echo "   1) iOS only (install CocoaPods)"
+  echo "   2) Android only (pre-download dependencies)"
+  echo "   3) Both iOS and Android (recommended)"
+  echo "   4) Skip platform setup"
+  choice=$(ask_option "   Select an option (1-4): " 4)
+
+  case $choice in
+    1)
+      SETUP_IOS="true"
+      SETUP_ANDROID="false"
+      ;;
+    2)
+      SETUP_IOS="false"
+      SETUP_ANDROID="true"
+      ;;
+    3)
+      SETUP_IOS="true"
+      SETUP_ANDROID="true"
+      ;;
+    4)
+      SETUP_IOS="false"
+      SETUP_ANDROID="false"
+      ;;
+  esac
 
   echo ""
 
   # Question 3: Device Type
   echo -e "${CYAN}3. Device Type${NC}"
-  PS3="   Select an option (1-3): "
-  options=("Mobile/Phone only" "Tablet only" "Universal (Mobile + Tablet)")
-  select opt in "${options[@]}"; do
-    case $opt in
-      "Mobile/Phone only")
-        DEVICE_TYPE="mobile"
-        break
-        ;;
-      "Tablet only")
-        DEVICE_TYPE="tablet"
-        break
-        ;;
-      "Universal (Mobile + Tablet)")
-        DEVICE_TYPE="universal"
-        break
-        ;;
-      *) echo "Invalid option. Please select 1-3.";;
-    esac
-  done
+  echo "   1) Mobile/Phone only"
+  echo "   2) Tablet only"
+  echo "   3) Universal (Mobile + Tablet)"
+  choice=$(ask_option "   Select an option (1-3): " 3)
+
+  case $choice in
+    1) DEVICE_TYPE="mobile" ;;
+    2) DEVICE_TYPE="tablet" ;;
+    3) DEVICE_TYPE="universal" ;;
+  esac
 
   echo ""
 
   # Question 4: Screen Orientation
   echo -e "${CYAN}4. Screen Orientation${NC}"
-  PS3="   Select an option (1-3): "
-  options=("Portrait only" "Landscape only" "Both orientations")
-  select opt in "${options[@]}"; do
-    case $opt in
-      "Portrait only")
-        ORIENTATION="portrait"
-        break
-        ;;
-      "Landscape only")
-        ORIENTATION="landscape"
-        break
-        ;;
-      "Both orientations")
-        ORIENTATION="both"
-        break
-        ;;
-      *) echo "Invalid option. Please select 1-3.";;
-    esac
-  done
+  echo "   1) Portrait only"
+  echo "   2) Landscape only"
+  echo "   3) Both orientations"
+  choice=$(ask_option "   Select an option (1-3): " 3)
+
+  case $choice in
+    1) ORIENTATION="portrait" ;;
+    2) ORIENTATION="landscape" ;;
+    3) ORIENTATION="both" ;;
+  esac
 
   echo ""
 
   # Question 5: Run initial test
   echo -e "${CYAN}5. Initial Test Run${NC}"
-  PS3="   Select an option (1-2): "
-  options=("Launch app after setup" "Skip test run (faster)")
-  select opt in "${options[@]}"; do
-    case $opt in
-      "Launch app after setup")
-        RUN_TEST="true"
-        # Ask which platform if both are set up
-        if [ "$SETUP_IOS" = "true" ] && [ "$SETUP_ANDROID" = "true" ]; then
-          echo ""
-          echo "   Which platform to test?"
-          PS3="   Select platform (1-2): "
-          test_options=("iOS simulator" "Android emulator")
-          select test_opt in "${test_options[@]}"; do
-            case $test_opt in
-              "iOS simulator")
-                TEST_PLATFORM="ios"
-                break
-                ;;
-              "Android emulator")
-                TEST_PLATFORM="android"
-                break
-                ;;
-              *) echo "Invalid option. Please select 1 or 2.";;
-            esac
-          done
-        elif [ "$SETUP_IOS" = "true" ]; then
-          TEST_PLATFORM="ios"
-        elif [ "$SETUP_ANDROID" = "true" ]; then
-          TEST_PLATFORM="android"
-        else
-          TEST_PLATFORM="none"
-        fi
-        break
-        ;;
-      "Skip test run (faster)")
-        RUN_TEST="false"
+  echo "   1) Launch app after setup"
+  echo "   2) Skip test run (faster)"
+  choice=$(ask_option "   Select an option (1-2): " 2)
+
+  case $choice in
+    1)
+      RUN_TEST="true"
+      # Ask which platform if both are set up
+      if [ "$SETUP_IOS" = "true" ] && [ "$SETUP_ANDROID" = "true" ]; then
+        echo ""
+        echo "   Which platform to test?"
+        echo "   1) iOS simulator"
+        echo "   2) Android emulator"
+        platform_choice=$(ask_option "   Select platform (1-2): " 2)
+
+        case $platform_choice in
+          1) TEST_PLATFORM="ios" ;;
+          2) TEST_PLATFORM="android" ;;
+        esac
+      elif [ "$SETUP_IOS" = "true" ]; then
+        TEST_PLATFORM="ios"
+      elif [ "$SETUP_ANDROID" = "true" ]; then
+        TEST_PLATFORM="android"
+      else
         TEST_PLATFORM="none"
-        break
-        ;;
-      *) echo "Invalid option. Please select 1 or 2.";;
-    esac
-  done
+      fi
+      ;;
+    2)
+      RUN_TEST="false"
+      TEST_PLATFORM="none"
+      ;;
+  esac
 
   echo ""
 
