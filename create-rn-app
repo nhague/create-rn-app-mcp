@@ -65,16 +65,17 @@ ask_option() {
 
   while true; do
     read -n 1 -p "$prompt" choice
-    echo ""  # New line after input
+    echo "" >&2  # New line after input (to terminal)
 
     # Validate input
     if [[ "$choice" =~ ^[1-9]$ ]] && [ "$choice" -le "$max_option" ]; then
-      # Show selected option in bold green
-      echo -e "   ${GREEN}${BOLD}→ Selected: ${options[$choice-1]}${NC}"
-      echo "$choice"
+      # Show selected option in bold green (directly to terminal, not captured)
+      echo -e "   ${GREEN}${BOLD}→ Selected: ${options[$choice-1]}${NC}" >&2
+      echo "$choice"  # This is what gets captured
       return
     else
-      print_error "Invalid option. Please select 1-$max_option."
+      # Send error to terminal, not to captured output
+      echo -e "${RED}❌ Invalid option. Please select 1-$max_option.${NC}" >&2
     fi
   done
 }
