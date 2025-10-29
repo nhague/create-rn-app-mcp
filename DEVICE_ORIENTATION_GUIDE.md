@@ -1,6 +1,6 @@
 # Device Type & Orientation Configuration Guide
 
-This document explains what files are modified when you select device type and orientation options.
+This guide covers the changes applied to **React Native projects** when you answer the device type and orientation questions. React web scaffolds do not modify native files, so you can skip this document for those runs.
 
 ---
 
@@ -194,3 +194,9 @@ The `create-rn-app` script modifies these files automatically based on your sele
 - **Portrait only:** Social media, messaging, content consumption
 - **Landscape only:** Games, video apps, presentation apps
 - **Both:** Most flexible, requires careful UI design
+
+---
+
+## 🌐 Note on React Web Projects
+
+When you select a React web scaffold, device constraints are handled inside the generated CSS/HTML instead of native manifests. Tablet mockups receive a fixed viewport (768×1024 portrait or 1024×768 landscape) and include the Android frame, guided drawers, and global controls. Phone mockups constrain the layout to 390×844.

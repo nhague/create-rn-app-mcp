@@ -1,103 +1,67 @@
-# Quick Start Guide 🚀
+# Quick Start 🚀
 
-**TL;DR:** One command to create a React Native project and sync it to GitHub.
+**TL;DR:** `create-rn-app "My Project"` now scaffolds Native **or** Web apps, wires GitHub (private), and is ready to run in minutes.
 
 ---
 
-## Installation (Do Once)
+## Install Once
 
 ```bash
 cd /Users/nate/Documents/development/create-rn-app-mcp
 ./install.sh
 ```
 
-Restart your terminal.
+Restart your shell (`exec zsh`).
 
 ---
 
-## Usage (Every Time)
+## Run Every Time
 
 ```bash
 create-rn-app "Your Project Name"
 ```
 
-Answer 4 simple questions, and you're done!
+You’ll answer a short decision tree:
+- App type → React Native or React Web
+- Native path → iOS/Android setup, device focus, orientation, optional simulator run
+- Web path → Standard vs PWA, plain web vs mockup, mockup device + orientation
+
+All repositories are created as **private** automatically.
 
 ---
 
-## What It Does
+## What Happens Under the Hood
 
-1. ✅ Creates React Native CLI project
-2. ✅ Installs iOS and/or Android dependencies
-3. ✅ Creates GitHub repository
-4. ✅ Pushes your code
-5. ✅ Opens in simulator/emulator (optional)
+- React Native: CLI project, optional pods/Gradle warmup, Info.plist & AndroidManifest tweaks, initial commit, push to GitHub.
+- React Web (Vite): Vite scaffolding, npm install, optional PWA plugin, optional mockup UI (tablet frame, reset/country buttons, flows + audit drawers), initial commit, push to GitHub.
 
 ---
 
-## Example
+## Example Session
 
 ```bash
-$ create-rn-app "Food App"
+$ create-rn-app "Tablet Demo"
+? Project Type: React Web app
+? Web Archetype: Progressive Web App (Vite + PWA plugin)
+? Presentation Mode: Mockup of a native app
+? Mockup Device Target: Tablet
+? Tablet Orientation: Landscape
 
-# Select options:
-1. Repository Visibility: Private
-2. Platform Setup: Both iOS and Android
-3. Initial Test Run: Yes (iOS simulator)
-4. Description: A food delivery app
+➡️ Scaffolds Vite + PWA
+➡️ Generates Android tablet frame UI
+➡️ Commits & pushes to private GitHub repo
 
-# Wait 3-5 minutes...
-
-✅ Done! Project created and synced to GitHub.
+✅ Done in ~3 minutes
 ```
 
 ---
 
-## Installation on Other Machines
+## Troubleshooting Quick Hits
 
-### Option 1: Copy the folder
-```bash
-# Copy create-rn-app-mcp folder to new machine
-cd create-rn-app-mcp
-./install.sh
-```
-
-### Option 2: From GitHub (after you push it)
-```bash
-git clone https://github.com/yourusername/create-rn-app-mcp.git
-cd create-rn-app-mcp
-./install.sh
-```
+- `gh auth login` if GitHub CLI complains.
+- `brew install node git gh` to fill missing core tools.
+- For PWA builds, drop icons into `public/pwa-192x192.png` & `public/pwa-512x512.png`.
 
 ---
 
-## Troubleshooting
-
-### "Command not found"
-```bash
-sudo cp create-rn-app /usr/local/bin/
-sudo chmod +x /usr/local/bin/create-rn-app
-```
-
-### "GitHub CLI not authenticated"
-```bash
-gh auth login
-```
-
-### "Missing tools"
-```bash
-brew install node git gh
-sudo gem install cocoapods
-```
-
----
-
-## Next Steps
-
-- Read `README.md` for full documentation
-- Read `CONVERSATION_SUMMARY.md` to understand the workflow
-- Create your first project!
-
----
-
-**Happy coding!** 🎉
+Happy shipping! 🎉

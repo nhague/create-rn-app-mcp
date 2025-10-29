@@ -21,7 +21,70 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # --- Configuration ---
-DEV_DIR="/Users/nate/Documents/development"
+# DEV_DIR will be set dynamically by ask_project_location()
+DEV_DIR=""
+
+# --- Global State ---
+APP_TYPE=""
+PROJECT_SLUG=""
+REPO_VISIBILITY="private"
+SETUP_IOS="false"
+SETUP_ANDROID="false"
+DEVICE_TYPE=""
+ORIENTATION=""
+RUN_TEST="false"
+TEST_PLATFORM="none"
+REPO_DESCRIPTION=""
+WEB_ARCHETYPE=""
+WEB_MOCKUP_MODE=""
+WEB_DEVICE_TARGET=""
+WEB_TABLET_ORIENTATION=""
+WEB_STAGING_DIR=""
+AUTO_LAUNCH_DEV_SERVER="false"
+
+free_port_5173() {
+  if [ "$APP_TYPE" != "React Web" ]; then
+    return
+  fi
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    return
+  fi
+
+  local pids
+  pids=$(lsof -ti tcp:5173 2>/dev/null | tr '\n' ' ')
+
+  if [ -n "$pids" ]; then
+    echo -e "${RED}Port 5173 is active right now, so I am killing it${NC}"
+    for pid in $pids; do
+      kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+    done
+    sleep 1
+  fi
+}
+
+# --- Output Helpers ---
+
+make_hyperlink() {
+  local text="$1"
+  local url="$2"
+
+  if [ -t 1 ]; then
+    printf "\033]8;;%s\033\\%s\033]8;;\033\\" "$url" "$text"
+  else
+    printf "%s" "$text"
+  fi
+}
+
+make_file_url() {
+  local path="$1"
+  local encoded="${path//' '/'%20'}"
+  echo "file://$encoded"
+}
+
+escape_for_single_quotes() {
+  printf "%s" "$1" | sed "s/'/'\\\\''/g"
+}
 
 # --- Helper Functions ---
 
@@ -87,6 +150,11 @@ cleanup_on_error() {
     rm -rf "$PROJECT_PATH"
   fi
 
+  if [ -n "$WEB_STAGING_DIR" ] && [ -d "$WEB_STAGING_DIR" ]; then
+    print_warning "Rolling back: Cleaning temporary web staging directory..."
+    rm -rf "$WEB_STAGING_DIR"
+  fi
+
   if [ -n "$GH_REPO_CREATED" ] && [ "$GH_REPO_CREATED" = "true" ]; then
     print_warning "Rolling back: Attempting to delete GitHub repository..."
     gh repo delete "$GH_USERNAME/$PROJECT_NAME" --yes 2>/dev/null || true
@@ -109,7 +177,7 @@ check_prerequisites() {
   local ios_warnings=()
 
   # Check for required commands
-  for cmd in gh npx git; do
+  for cmd in gh npx npm git; do
     if ! command -v $cmd &> /dev/null; then
       missing_tools+=("$cmd")
     fi
@@ -126,6 +194,9 @@ check_prerequisites() {
           ;;
         npx)
           echo "  - Node.js (includes npx): brew install node"
+          ;;
+        npm)
+          echo "  - Node.js (includes npm): brew install node"
           ;;
         git)
           echo "  - Git: brew install git"
@@ -190,7 +261,152 @@ check_prerequisites() {
   fi
 }
 
-# --- Step 2: Input Validation and Sanitization ---
+ensure_vscode_available() {
+  if [ "$APP_TYPE" != "React Web" ]; then
+    return
+  fi
+
+  local vscode_cli_available=false
+
+  if command -v code >/dev/null 2>&1; then
+    vscode_cli_available=true
+  fi
+
+  if [ $vscode_cli_available = false ]; then
+    if [ -d "/Applications/Visual Studio Code.app" ]; then
+      print_error "Install vscode before I can continue"
+      print_info "Tip: Launch VS Code, open the Command Palette, and run 'Shell Command: Install 'code' command in PATH'."
+    else
+      print_error "Install vscode before I can continue"
+    fi
+    exit 1
+  fi
+
+  AUTO_LAUNCH_DEV_SERVER="true"
+  free_port_5173
+}
+
+# --- Step 2: Ask Project Location ---
+
+ask_project_location() {
+  echo ""
+  echo -e "${BOLD}Where would you like to create your project?${NC}"
+  echo ""
+
+  # Get current username
+  local USERNAME=$(whoami)
+  if [ -z "$USERNAME" ]; then
+    USERNAME=$(id -un)
+  fi
+
+  # Build Documents path
+  local DOCS_PATH="/Users/$USERNAME/Documents"
+
+  # Check if Documents folder exists
+  local DOCS_EXISTS=false
+  if [ -d "$DOCS_PATH" ]; then
+    DOCS_EXISTS=true
+  fi
+
+  local DEFAULT_DEV_DIR="$DOCS_PATH/development"
+
+  echo -e "${CYAN}Choose a location:${NC}"
+  if [ "$DOCS_EXISTS" = "true" ]; then
+    echo "   1) $DEFAULT_DEV_DIR (auto-create if missing)"
+    echo "   2) Another location (you'll enter the full path)"
+    choice=$(ask_option "   Select an option (1-2): " 2 "$DEFAULT_DEV_DIR (auto-create if missing)" "Another location (you'll enter the full path)")
+  else
+    print_warning "Your Documents folder was not found at: $DOCS_PATH"
+    echo "   1) Another location (you'll enter the full path)"
+    choice=1
+  fi
+
+  echo ""
+
+  if [ "$DOCS_EXISTS" = "true" ] && [ "$choice" = "1" ]; then
+    # Option 1: Use Documents/development folder (create if missing)
+    if [ ! -d "$DEFAULT_DEV_DIR" ]; then
+      if mkdir -p "$DEFAULT_DEV_DIR" 2>/dev/null; then
+        print_info "Created development workspace at: $DEFAULT_DEV_DIR"
+      else
+        print_error "Unable to create default development folder at: $DEFAULT_DEV_DIR"
+        exit 1
+      fi
+    fi
+
+    DEV_DIR="$DEFAULT_DEV_DIR"
+    print_success "Using location: $DEV_DIR"
+  else
+    # Option 2: Manual entry
+    while true; do
+      read -p "Enter the full path where you want to create projects: " USER_PATH
+
+      # Expand tilde if present
+      USER_PATH="${USER_PATH/#\~/$HOME}"
+
+      # Remove trailing slash if present
+      USER_PATH="${USER_PATH%/}"
+
+      # Check if path is empty
+      if [ -z "$USER_PATH" ]; then
+        print_error "Path cannot be empty. Please try again."
+        continue
+      fi
+
+      # Convert to absolute path if relative
+      if [[ "$USER_PATH" != /* ]]; then
+        USER_PATH="$(cd "$(dirname "$USER_PATH")" 2>/dev/null && pwd)/$(basename "$USER_PATH")" || USER_PATH=""
+        if [ -z "$USER_PATH" ]; then
+          print_error "Invalid path. Please enter a valid absolute path."
+          continue
+        fi
+      fi
+
+      # Check if directory exists
+      if [ ! -d "$USER_PATH" ]; then
+        print_error "Directory does not exist: $USER_PATH"
+        read -p "Would you like to create it? (y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+          if mkdir -p "$USER_PATH" 2>/dev/null; then
+            print_success "Directory created: $USER_PATH"
+          else
+            print_error "Failed to create directory. Check permissions."
+            continue
+          fi
+        else
+          continue
+        fi
+      fi
+
+      # Check if directory is writable
+      if [ ! -w "$USER_PATH" ]; then
+        print_error "You don't have write permission for: $USER_PATH"
+        continue
+      fi
+
+      DEV_DIR="$USER_PATH"
+
+      if [ "$DOCS_EXISTS" = "true" ] && [ "$DEV_DIR" = "$DOCS_PATH" ]; then
+        local ALT_DEV_DIR="$DOCS_PATH/development"
+        if [ ! -d "$ALT_DEV_DIR" ]; then
+          if mkdir -p "$ALT_DEV_DIR" 2>/dev/null; then
+            print_info "Created development workspace at: $ALT_DEV_DIR"
+          else
+            print_error "Unable to create development folder at: $ALT_DEV_DIR"
+            exit 1
+          fi
+        fi
+        DEV_DIR="$ALT_DEV_DIR"
+      fi
+
+      print_success "Using location: $DEV_DIR"
+      break
+    done
+  fi
+}
+
+# --- Step 3: Input Validation and Sanitization ---
 
 get_project_name() {
   if [ -z "$1" ]; then
@@ -211,6 +427,20 @@ get_project_name() {
     exit 1
   fi
 
+  PROJECT_SLUG=$(echo "$RAW_PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\{2,\}/-/g' | sed 's/^-//' | sed 's/-$//')
+
+  if [ -z "$PROJECT_SLUG" ]; then
+    PROJECT_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+  fi
+
+  print_info "Sanitized project name: $PROJECT_NAME"
+  print_info "Package slug: $PROJECT_SLUG"
+}
+
+# --- Step 4: Validate Project Path ---
+
+validate_project_path() {
+  # Set the full project path (DEV_DIR must be set by ask_project_location first)
   PROJECT_PATH="$DEV_DIR/$PROJECT_NAME"
 
   # Check if directory already exists
@@ -219,30 +449,12 @@ get_project_name() {
     exit 1
   fi
 
-  print_info "Sanitized project name: $PROJECT_NAME"
+  print_info "Project will be created at: $PROJECT_PATH"
 }
 
 # --- Step 3: Interactive Configuration ---
 
-ask_user_preferences() {
-  echo ""
-  echo -e "${BOLD}Let's configure your project:${NC}"
-  echo ""
-
-  # Question 1: Repository visibility
-  echo -e "${CYAN}1. GitHub Repository Visibility${NC}"
-  echo "   1) Public (anyone can see)"
-  echo "   2) Private (only you can see)"
-  choice=$(ask_option "   Select an option (1-2): " 2 "Public (anyone can see)" "Private (only you can see)")
-
-  case $choice in
-    1) REPO_VISIBILITY="public" ;;
-    2) REPO_VISIBILITY="private" ;;
-  esac
-
-  echo ""
-
-  # Question 2: Platform Setup
+ask_react_native_preferences() {
   echo -e "${CYAN}2. Platform Setup${NC}"
   echo "   1) iOS only (install CocoaPods)"
   echo "   2) Android only (pre-download dependencies)"
@@ -271,7 +483,6 @@ ask_user_preferences() {
 
   echo ""
 
-  # Question 3: Device Type
   echo -e "${CYAN}3. Device Type${NC}"
   echo "   1) Mobile/Phone only"
   echo "   2) Tablet only"
@@ -286,7 +497,6 @@ ask_user_preferences() {
 
   echo ""
 
-  # Question 4: Screen Orientation
   echo -e "${CYAN}4. Screen Orientation${NC}"
   echo "   1) Portrait only"
   echo "   2) Landscape only"
@@ -301,7 +511,6 @@ ask_user_preferences() {
 
   echo ""
 
-  # Question 5: Run initial test
   echo -e "${CYAN}5. Initial Test Run${NC}"
   echo "   1) Launch app after setup"
   echo "   2) Skip test run (faster)"
@@ -310,7 +519,6 @@ ask_user_preferences() {
   case $choice in
     1)
       RUN_TEST="true"
-      # Ask which platform if both are set up
       if [ "$SETUP_IOS" = "true" ] && [ "$SETUP_ANDROID" = "true" ]; then
         echo ""
         echo "   Which platform to test?"
@@ -335,44 +543,150 @@ ask_user_preferences() {
       TEST_PLATFORM="none"
       ;;
   esac
+}
+
+ask_react_web_preferences() {
+  echo -e "${CYAN}2. Web Archetype${NC}"
+  echo "   1) Standard web app (Vite React)"
+  echo "   2) Progressive Web App (Vite + PWA plugin)"
+  choice=$(ask_option "   Select an option (1-2): " 2 "Standard web app (Vite React)" "Progressive Web App (Vite + PWA plugin)")
+
+  case $choice in
+    1) WEB_ARCHETYPE="standard" ;;
+    2) WEB_ARCHETYPE="pwa" ;;
+  esac
 
   echo ""
 
-  # Question 6: Add description
-  echo -e "${CYAN}6. Repository Description${NC}"
-  read -p "   Enter a description (optional, press Enter to skip): " REPO_DESCRIPTION
+  echo -e "${CYAN}3. Presentation Mode${NC}"
+  echo "   1) Just a web app"
+  echo "   2) Mockup of a native app"
+  choice=$(ask_option "   Select an option (1-2): " 2 "Just a web app" "Mockup of a native app")
 
+  case $choice in
+    1)
+      WEB_MOCKUP_MODE="none"
+      WEB_DEVICE_TARGET=""
+      WEB_TABLET_ORIENTATION=""
+      ;;
+    2)
+      WEB_MOCKUP_MODE="mockup"
+      echo ""
+      echo -e "${CYAN}4. Mockup Device Target${NC}"
+      echo "   1) Phone"
+      echo "   2) Tablet"
+      echo "   3) Both phone and tablet"
+      device_choice=$(ask_option "   Select an option (1-3): " 3 "Phone" "Tablet" "Both phone and tablet")
+
+      case $device_choice in
+        1)
+          WEB_DEVICE_TARGET="phone"
+          WEB_TABLET_ORIENTATION=""
+          ;;
+        2)
+          WEB_DEVICE_TARGET="tablet"
+          echo ""
+          echo -e "${CYAN}5. Tablet Orientation${NC}"
+          echo "   1) Portrait"
+          echo "   2) Landscape"
+          orientation_choice=$(ask_option "   Select an option (1-2): " 2 "Portrait" "Landscape")
+
+          case $orientation_choice in
+            1) WEB_TABLET_ORIENTATION="portrait" ;;
+            2) WEB_TABLET_ORIENTATION="landscape" ;;
+          esac
+          ;;
+        3)
+          WEB_DEVICE_TARGET="both"
+          WEB_TABLET_ORIENTATION=""
+          ;;
+      esac
+      ;;
+  esac
+}
+
+print_configuration_summary() {
   echo ""
   echo -e "${BOLD}Configuration Summary:${NC}"
   echo "  - Project Name:    $PROJECT_NAME"
   echo "  - Location:        $PROJECT_PATH"
-  echo "  - Visibility:      $REPO_VISIBILITY"
+  echo "  - Project Type:    $APP_TYPE"
+  echo "  - Visibility:      private (auto-set)"
 
-  # Show iOS/Android with green ticks or red crosses
-  if [ "$SETUP_IOS" = "true" ]; then
-    echo -e "  - Setup iOS:       ${GREEN}✓${NC} Yes"
+  if [ "$APP_TYPE" = "React Native" ]; then
+    if [ "$SETUP_IOS" = "true" ]; then
+      echo -e "  - Setup iOS:       ${GREEN}✓${NC} Yes"
+    else
+      echo -e "  - Setup iOS:       ${RED}✗${NC} No"
+    fi
+
+    if [ "$SETUP_ANDROID" = "true" ]; then
+      echo -e "  - Setup Android:   ${GREEN}✓${NC} Yes"
+    else
+      echo -e "  - Setup Android:   ${RED}✗${NC} No"
+    fi
+
+    echo "  - Device Type:     $DEVICE_TYPE"
+    echo "  - Orientation:     $ORIENTATION"
+
+    if [ "$RUN_TEST" = "true" ]; then
+      echo -e "  - Run Test:        ${GREEN}✓${NC} Yes ($TEST_PLATFORM)"
+    else
+      echo -e "  - Run Test:        ${RED}✗${NC} No"
+    fi
   else
-    echo -e "  - Setup iOS:       ${RED}✗${NC} No"
-  fi
+    echo "  - Web Archetype:   $WEB_ARCHETYPE"
 
-  if [ "$SETUP_ANDROID" = "true" ]; then
-    echo -e "  - Setup Android:   ${GREEN}✓${NC} Yes"
-  else
-    echo -e "  - Setup Android:   ${RED}✗${NC} No"
-  fi
-
-  echo "  - Device Type:     $DEVICE_TYPE"
-  echo "  - Orientation:     $ORIENTATION"
-
-  if [ "$RUN_TEST" = "true" ]; then
-    echo -e "  - Run Test:        ${GREEN}✓${NC} Yes ($TEST_PLATFORM)"
-  else
-    echo -e "  - Run Test:        ${RED}✗${NC} No"
+    if [ "$WEB_MOCKUP_MODE" = "mockup" ]; then
+      echo "  - Mockup Mode:     Native mockup"
+      echo "  - Target Device:   $WEB_DEVICE_TARGET"
+      if [ "$WEB_DEVICE_TARGET" = "tablet" ]; then
+        echo "  - Orientation:     $WEB_TABLET_ORIENTATION"
+      fi
+    else
+      echo "  - Mockup Mode:     None (standard web layout)"
+    fi
   fi
 
   echo "  - Description:     ${REPO_DESCRIPTION:-None}"
   echo "  - GitHub URL:      https://github.com/$GH_USERNAME/$PROJECT_NAME"
   echo ""
+}
+
+ask_user_preferences() {
+  echo ""
+  echo -e "${BOLD}Let's configure your project:${NC}"
+  echo ""
+
+  echo -e "${CYAN}1. Project Type${NC}"
+  echo "   1) React Native app (iOS/Android)"
+  echo "   2) React Web app"
+  choice=$(ask_option "   Select an option (1-2): " 2 "React Native app (iOS/Android)" "React Web app")
+
+  case $choice in
+    1)
+      APP_TYPE="React Native"
+      ;;
+    2)
+      APP_TYPE="React Web"
+      ;;
+  esac
+
+  echo ""
+  print_info "GitHub repositories will be created as private by default."
+  echo ""
+
+  if [ "$APP_TYPE" = "React Native" ]; then
+    ask_react_native_preferences
+  else
+    ask_react_web_preferences
+  fi
+
+  echo ""
+  echo -e "${CYAN}Repository Description${NC}"
+  read -p "   Enter a description (optional, press Enter to skip): " REPO_DESCRIPTION
+
+  print_configuration_summary
 
   read -p "Proceed with these settings? (y/n): " -n 1 -r
   echo ""
@@ -400,6 +714,863 @@ create_react_native_project() {
   # Navigate into project
   cd "$PROJECT_PATH" || exit 1
 }
+
+# --- Step 4 (Web): Create React Web Project ---
+
+create_react_web_project() {
+  print_step "Navigating to development directory..."
+  cd "$DEV_DIR" || exit 1
+
+  print_step "Creating Vite React project..."
+  echo ""
+
+  local staging_root="$DEV_DIR/.create-rn-app-web-stage"
+  mkdir -p "$staging_root"
+
+  local staging_dir="$staging_root/$PROJECT_SLUG"
+  local counter=0
+  while [ -e "$staging_dir" ]; do
+    counter=$((counter + 1))
+    staging_dir="$staging_root/${PROJECT_SLUG}-${counter}"
+  done
+
+  WEB_STAGING_DIR="$staging_dir"
+
+  npx --yes degit vitejs/vite/packages/create-vite/template-react "$staging_dir"
+
+  mv "$staging_dir" "$PROJECT_PATH"
+  WEB_STAGING_DIR=""
+
+  rmdir "$staging_root" 2>/dev/null || true
+
+  cd "$PROJECT_PATH" || exit 1
+
+  update_package_json_name "$PROJECT_SLUG"
+
+  print_success "React web project created!"
+
+  print_step "Installing project dependencies (npm install)..."
+  npm install
+}
+
+setup_web_pwa() {
+  print_step "Enabling PWA capabilities..."
+  npm install vite-plugin-pwa -D
+
+  cat <<EOF > vite.config.js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      manifest: {
+        name: '$RAW_PROJECT_NAME',
+        short_name: '$PROJECT_NAME',
+        description: 'Progressive Web App scaffold generated by create-rn-app',
+        theme_color: '#0f172a',
+        background_color: '#0f172a',
+        display: 'standalone',
+        icons: [
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png'
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png'
+          },
+          {
+            src: 'pwa-512x512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
+          }
+        ]
+      }
+    })
+  ]
+})
+EOF
+
+  print_info "PWA manifest ready. Remember to add icon files to the public/ directory."
+}
+
+ensure_mockup_directories() {
+  mkdir -p "$PROJECT_PATH/src/components"
+}
+
+update_package_json_name() {
+  local desired_name="$1"
+  local package_file="$PROJECT_PATH/package.json"
+
+  if [ ! -f "$package_file" ]; then
+    return
+  fi
+
+  PACKAGE_FILE="$package_file" NEW_PACKAGE_NAME="$desired_name" node <<'NODE'
+const fs = require('fs');
+const path = process.env.PACKAGE_FILE;
+const newName = process.env.NEW_PACKAGE_NAME;
+
+try {
+  const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+  pkg.name = newName;
+  fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+} catch (error) {
+  console.error('⚠️  Unable to set package.json name:', error.message);
+}
+NODE
+}
+
+generate_mockup_app_css() {
+  local device_target="$1"
+  local frame_width="$2"
+  local frame_height="$3"
+  local tablet_orientation="$4"
+
+  cat <<EOF
+/* Tablet mockup styling */
+:root {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #120736;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.mockup-root {
+  min-height: 100vh;
+  background: radial-gradient(circle at 20% 20%, #6933ff 0%, #4411c4 45%, #1b0644 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 4rem;
+  box-sizing: border-box;
+}
+
+.mockup-shell {
+  display: flex;
+  align-items: center;
+  gap: 2.5rem;
+  position: relative;
+}
+
+.mockup-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.control-button {
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  border: none;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.36);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: linear-gradient(160deg, #161b2b, #0b0d17);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.control-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 26px 50px rgba(27, 25, 58, 0.45);
+}
+
+.control-button:active {
+  transform: translateY(0);
+}
+
+.mockup-frame {
+  background: linear-gradient(160deg, #1d113f 0%, #050112 100%);
+  padding: 1.75rem;
+  border-radius: 32px;
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mockup-frame.responsive {
+  transition: width 0.35s ease, height 0.35s ease;
+}
+
+.mockup-screen {
+  background: linear-gradient(180deg, #262c4c 0%, #1d223d 100%);
+  border-radius: 24px;
+  width: ${frame_width}px;
+  height: ${frame_height}px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.mockup-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 65%);
+  pointer-events: none;
+}
+
+.mockup-screen-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  gap: 1.5rem;
+  text-align: center;
+  color: #f8fafc;
+}
+
+.mockup-screen-content h1 {
+  font-size: 2.25rem;
+  letter-spacing: 0.02em;
+}
+
+.mockup-screen-content p {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  max-width: 22rem;
+  color: rgba(241, 245, 249, 0.82);
+}
+
+.mockup-screen-content code {
+  background: rgba(148, 163, 184, 0.15);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  color: #cbd5f5;
+}
+
+.device-meta {
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.drawer-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.drawer-button {
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.drawer-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+.drawer-button:active {
+  transform: translateY(0);
+}
+
+.drawer-button.flows {
+  background: linear-gradient(160deg, #2563eb, #1d4ed8);
+}
+
+.drawer-button.audit {
+  background: linear-gradient(160deg, #fb923c, #f97316);
+}
+
+.no-mockup-placeholder {
+  width: 100%;
+  height: 100%;
+  backdrop-filter: blur(6px);
+}
+
+@media (max-width: 1180px) {
+  .mockup-root {
+    padding: 2rem;
+  }
+
+  .mockup-shell {
+    flex-direction: column-reverse;
+    gap: 1.75rem;
+  }
+
+  .mockup-controls {
+    flex-direction: row;
+  }
+}
+
+EOF
+
+  if [ "$device_target" = "both" ]; then
+    cat <<'EOF'
+@media (min-width: 880px) {
+  :root {
+    --frame-width-desktop: 1024px;
+    --frame-height-desktop: 768px;
+  }
+
+  .mockup-screen {
+    width: var(--frame-width-desktop);
+    height: var(--frame-height-desktop);
+  }
+}
+
+@media (max-width: 879px) {
+  .mockup-screen {
+    width: 390px;
+    height: 844px;
+  }
+}
+
+EOF
+  fi
+}
+
+generate_common_index_css() {
+  cat <<'EOF'
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #0f0a2a;
+  color: #e2e8f0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+EOF
+}
+
+write_android_status_bar() {
+  cat <<'EOF' > "$PROJECT_PATH/src/components/AndroidStatusBar.jsx"
+import './AndroidStatusBar.css'
+
+export default function AndroidStatusBar() {
+  return (
+    <div className="status-bar">
+      <span className="status-time">12:45</span>
+      <div className="status-icons">
+        <span className="icon wifi" aria-hidden="true" />
+        <span className="icon signal" aria-hidden="true" />
+        <span className="icon battery" aria-hidden="true">
+          <span className="battery-level" />
+        </span>
+      </div>
+    </div>
+  )
+}
+EOF
+
+  cat <<'EOF' > "$PROJECT_PATH/src/components/AndroidStatusBar.css"
+.status-bar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.75rem;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(15, 23, 42, 0.6));
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.status-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.icon {
+  display: inline-block;
+  position: relative;
+}
+
+.icon.wifi,
+.icon.signal {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+}
+
+.icon.battery {
+  width: 26px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  padding: 1px;
+}
+
+.icon.battery::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 4px;
+  width: 4px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 1px;
+}
+
+.battery-level {
+  flex: 1;
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  border-radius: 2px;
+}
+EOF
+}
+
+write_reset_button() {
+  cat <<'EOF' > "$PROJECT_PATH/src/components/ResetButton.jsx"
+import './ResetButton.css'
+
+export default function ResetButton({ onReset }) {
+  return (
+    <button type="button" className="control-button reset" onClick={onReset}>
+      Reset
+    </button>
+  )
+}
+EOF
+
+  cat <<'EOF' > "$PROJECT_PATH/src/components/ResetButton.css"
+.control-button.reset {
+  text-transform: uppercase;
+}
+EOF
+}
+
+write_country_selector() {
+  cat <<'EOF' > "$PROJECT_PATH/src/components/CountrySelectorButton.jsx"
+import { useState } from 'react'
+import './CountrySelectorButton.css'
+
+const COUNTRIES = [
+  { code: 'US', label: 'United States', flag: '🇺🇸' },
+  { code: 'GB', label: 'United Kingdom', flag: '🇬🇧' },
+  { code: 'CA', label: 'Canada', flag: '🇨🇦' },
+  { code: 'AU', label: 'Australia', flag: '🇦🇺' }
+]
+
+export default function CountrySelectorButton({ value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const current = COUNTRIES.find((c) => c.code === value) ?? COUNTRIES[0]
+
+  const handleSelect = (code) => {
+    onChange(code)
+    setOpen(false)
+  }
+
+  return (
+    <div className="country-selector">
+      <button
+        type="button"
+        className="control-button country"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="flag" role="img" aria-label={current.label}>
+          {current.flag}
+        </span>
+        <span className="code">{current.code}</span>
+      </button>
+      {open && (
+        <ul className="country-menu" role="listbox">
+          {COUNTRIES.map((country) => (
+            <li key={country.code}>
+              <button type="button" onClick={() => handleSelect(country.code)}>
+                <span role="img" aria-hidden="true">
+                  {country.flag}
+                </span>
+                <span>{country.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+EOF
+
+  cat <<'EOF' > "$PROJECT_PATH/src/components/CountrySelectorButton.css"
+.country-selector {
+  position: relative;
+}
+
+.control-button.country {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 1rem;
+  gap: 0.45rem;
+  background: linear-gradient(140deg, #1f55ff, #1c3bd7);
+  border: none;
+}
+
+.control-button.country .flag {
+  font-size: 1.75rem;
+}
+
+.control-button.country .code {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.country-menu {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 0.75rem;
+  min-width: 180px;
+  background: #0f172a;
+  border-radius: 14px;
+  padding: 0.6rem;
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  z-index: 20;
+}
+
+.country-menu button {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: flex-start;
+  background: transparent;
+  border: none;
+  color: #e2e8f0;
+  font-weight: 500;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.country-menu button:hover {
+  background: rgba(37, 99, 235, 0.25);
+}
+EOF
+}
+
+write_drawer_components() {
+  cat <<'EOF' > "$PROJECT_PATH/src/components/FlowsDrawer.jsx"
+import './Drawer.css'
+
+export default function FlowsDrawer({ open, onClose }) {
+  return (
+    <section className={`drawer flows ${open ? 'open' : ''}`} aria-hidden={!open}>
+      <header className="drawer-header">
+        <div>
+          <p className="drawer-kicker">Guided Paths</p>
+          <h2>Flows Workspace</h2>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close flows drawer">
+          ×
+        </button>
+      </header>
+      <div className="drawer-body">
+        <p className="drawer-empty">No flows defined yet. Start scaffolding your experience here.</p>
+      </div>
+    </section>
+  )
+}
+EOF
+
+  cat <<'EOF' > "$PROJECT_PATH/src/components/AuditDrawer.jsx"
+import './Drawer.css'
+
+export default function AuditDrawer({ open, onClose }) {
+  return (
+    <section className={`drawer audit ${open ? 'open' : ''}`} aria-hidden={!open}>
+      <header className="drawer-header">
+        <div>
+          <p className="drawer-kicker">Audit Trail</p>
+          <h2>Activity Log</h2>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close audit drawer">
+          ×
+        </button>
+      </header>
+      <div className="drawer-body">
+        <p className="drawer-empty">No events yet. Interact with your mockup to populate the log.</p>
+      </div>
+    </section>
+  )
+}
+EOF
+
+  cat <<'EOF' > "$PROJECT_PATH/src/components/Drawer.css"
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(420px, 90vw);
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(22px);
+  transform: translateX(100%);
+  transition: transform 0.32s ease, box-shadow 0.32s ease;
+  box-shadow: -40px 0 60px rgba(30, 16, 60, 0.35);
+  border-left: 1px solid rgba(99, 102, 241, 0.3);
+  display: flex;
+  flex-direction: column;
+  z-index: 40;
+  color: #f8fafc;
+}
+
+.drawer.open {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.75rem 2rem;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.drawer-header h2 {
+  font-size: 1.5rem;
+  margin-top: 0.4rem;
+}
+
+.drawer-header button {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(148, 163, 184, 0.18);
+  color: #fff;
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+
+.drawer-body {
+  flex: 1;
+  padding: 1.75rem 2rem;
+  overflow-y: auto;
+}
+
+.drawer-empty {
+  margin-top: 2rem;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.drawer.flows {
+  border-left-color: rgba(59, 130, 246, 0.4);
+}
+
+.drawer.audit {
+  border-left-color: rgba(249, 115, 22, 0.4);
+}
+
+.drawer-kicker {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(129, 140, 248, 0.85);
+}
+EOF
+}
+
+write_app_component() {
+  local device_target="$1"
+  local frame_class_suffix=""
+
+  if [ "$device_target" = "both" ]; then
+    frame_class_suffix=" responsive"
+  fi
+
+  cat <<EOF > "$PROJECT_PATH/src/App.jsx"
+import { useState } from 'react'
+import AndroidStatusBar from './components/AndroidStatusBar'
+import ResetButton from './components/ResetButton'
+import CountrySelectorButton from './components/CountrySelectorButton'
+import FlowsDrawer from './components/FlowsDrawer'
+import AuditDrawer from './components/AuditDrawer'
+import './App.css'
+
+export default function App() {
+  const [openDrawer, setOpenDrawer] = useState(null)
+  const [country, setCountry] = useState('US')
+
+  const handleReset = () => {
+    localStorage.clear()
+    sessionStorage.clear()
+    window.location.reload()
+  }
+
+  return (
+    <div className="mockup-root">
+      <FlowsDrawer open={openDrawer === 'flows'} onClose={() => setOpenDrawer(null)} />
+      <AuditDrawer open={openDrawer === 'audit'} onClose={() => setOpenDrawer(null)} />
+
+      <div className="mockup-shell">
+        <div className="mockup-controls">
+          <ResetButton onReset={handleReset} />
+          <CountrySelectorButton value={country} onChange={setCountry} />
+          <div className="drawer-buttons">
+            <button
+              type="button"
+              className="drawer-button flows"
+              onClick={() => setOpenDrawer(openDrawer === 'flows' ? null : 'flows')}
+            >
+              Flows
+            </button>
+            <button
+              type="button"
+              className="drawer-button audit"
+              onClick={() => setOpenDrawer(openDrawer === 'audit' ? null : 'audit')}
+            >
+              Audit
+            </button>
+          </div>
+        </div>
+
+        <div className="mockup-frame$frame_class_suffix">
+          <AndroidStatusBar />
+          <div className="mockup-screen">
+            <div className="mockup-screen-content">
+              <h1>Blank Canvas</h1>
+              <p>
+                Guided flows, locale-specific onboarding, and audits start here.
+                Drop your components into <code>mockup-screen-content</code> and iterate fast.
+              </p>
+              <span className="device-meta">
+                Active region: <strong>{country}</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+EOF
+}
+
+apply_web_mockup_templates() {
+  print_step "Applying native mockup scaffolding..."
+  ensure_mockup_directories
+
+  local device_target="$WEB_DEVICE_TARGET"
+  local width=""
+  local height=""
+
+  case "$device_target" in
+    phone)
+      width="390"
+      height="844"
+      ;;
+    tablet)
+      if [ "$WEB_TABLET_ORIENTATION" = "landscape" ]; then
+        width="1024"
+        height="768"
+      else
+        width="768"
+        height="1024"
+      fi
+      ;;
+    both)
+      width="390"
+      height="844"
+      ;;
+    *)
+      width="768"
+      height="1024"
+      ;;
+  esac
+
+  write_android_status_bar
+  write_reset_button
+  write_country_selector
+  write_drawer_components
+  write_app_component "$device_target"
+
+  generate_mockup_app_css "$device_target" "$width" "$height" "$WEB_TABLET_ORIENTATION" > "$PROJECT_PATH/src/App.css"
+  generate_common_index_css > "$PROJECT_PATH/src/index.css"
+
+  # Adjust viewport meta tag to emulate target hardware when applicable
+  local index_html="$PROJECT_PATH/index.html"
+
+  if [ -f "$index_html" ]; then
+    local viewport_content=""
+    case "$device_target" in
+      phone)
+        viewport_content='width=390'
+        ;;
+      tablet)
+        if [ "$WEB_TABLET_ORIENTATION" = "landscape" ]; then
+          viewport_content='width=1024'
+        else
+          viewport_content='width=768'
+        fi
+        ;;
+      both)
+        viewport_content='width=device-width'
+        ;;
+      *)
+        viewport_content='width=device-width'
+        ;;
+    esac
+
+    local meta_tag="<meta name=\"viewport\" content=\"$viewport_content, initial-scale=1.0, maximum-scale=1.0, user-scalable=no\">"
+
+    if grep -q '<meta name="viewport"' "$index_html"; then
+      sed -i.bak "s|<meta name=\"viewport\"[^>]*>|$meta_tag|" "$index_html"
+    else
+      sed -i.bak "/<meta charset/a\\
+$meta_tag" "$index_html"
+    fi
+
+    rm -f "$index_html.bak"
+  fi
+
+  print_success "Mockup scaffolding applied for $device_target layout."
+}
+
 
 # --- Step 3: Setup iOS Dependencies ---
 
@@ -652,10 +1823,42 @@ configure_platform_settings() {
   print_success "Platform settings configured!"
 }
 
+# --- Step 5: Prepare Local Git Repository ---
+
+initialize_local_repository() {
+  print_step "Preparing local Git repository..."
+
+  if [ ! -d .git ]; then
+    git init > /dev/null
+  fi
+
+  git add .
+
+  if [ -z "$(git status --porcelain)" ]; then
+    print_info "No changes detected to commit."
+    return
+  fi
+
+  local commit_message="Initial commit: Scaffold project"
+
+  if [ "$APP_TYPE" = "React Native" ]; then
+    commit_message="Initial commit: Scaffold React Native project"
+  else
+    if [ "$WEB_ARCHETYPE" = "pwa" ]; then
+      commit_message="Initial commit: Scaffold Vite React PWA"
+    else
+      commit_message="Initial commit: Scaffold Vite React app"
+    fi
+  fi
+
+  git commit -m "$commit_message" > /dev/null
+  print_success "Local repository ready!"
+}
+
 # --- Step 6: Create GitHub Repository ---
 
 create_github_repo() {
-  print_step "[6/7] Creating GitHub repository..."
+  print_step "Creating GitHub repository..."
 
   # Build the gh command
   GH_CMD="gh repo create $PROJECT_NAME --$REPO_VISIBILITY --source=. --remote=origin"
@@ -675,7 +1878,7 @@ create_github_repo() {
 # --- Step 7: Push to GitHub ---
 
 push_to_github() {
-  print_step "[7/7] Syncing with GitHub..."
+  print_step "Syncing with GitHub..."
 
   # Ensure we're on main branch
   git branch -M main
@@ -689,6 +1892,10 @@ push_to_github() {
 # --- Optional: Run Test ---
 
 run_initial_test() {
+  if [ "$APP_TYPE" != "React Native" ]; then
+    return
+  fi
+
   if [ "$RUN_TEST" = "true" ] && [ "$TEST_PLATFORM" != "none" ]; then
     print_step "Launching app on $TEST_PLATFORM..."
     echo ""
@@ -745,6 +1952,55 @@ run_initial_test() {
   fi
 }
 
+launch_vscode_dev_server() {
+  if [ "$APP_TYPE" != "React Web" ] || [ "$AUTO_LAUNCH_DEV_SERVER" != "true" ]; then
+    return
+  fi
+
+  if ! command -v code >/dev/null 2>&1; then
+    return
+  fi
+
+  print_step "Opening project in Visual Studio Code..."
+
+  code "$PROJECT_PATH" >/dev/null 2>&1 &
+  sleep 2
+
+  if command -v osascript >/dev/null 2>&1; then
+    free_port_5173
+
+    local escaped_path
+    escaped_path=$(escape_for_single_quotes "$PROJECT_PATH")
+
+    if ! osascript <<EOF >/dev/null 2>&1
+tell application "Terminal"
+  activate
+  do script "cd '$escaped_path' && npm run dev"
+end tell
+EOF
+    then
+      print_warning "Unable to launch npm run dev in Terminal automatically."
+    else
+      print_success "Terminal started: npm run dev"
+
+      # Give the dev server a brief moment to boot before opening the browser
+      sleep 2
+
+      if command -v open >/dev/null 2>&1; then
+        if open "http://localhost:5173" >/dev/null 2>&1; then
+          print_success "Opened http://localhost:5173 in your default browser"
+        else
+          print_warning "Failed to open http://localhost:5173 automatically"
+        fi
+      else
+        print_warning "'open' command not available; please visit http://localhost:5173 manually"
+      fi
+    fi
+  else
+    print_warning "osascript not available; unable to open Terminal automatically."
+  fi
+}
+
 # --- Final Success Message ---
 
 print_final_message() {
@@ -762,50 +2018,66 @@ print_final_message() {
   echo ""
   echo -e "${BOLD}Next steps:${NC}"
   echo ""
-  echo "  cd $PROJECT_PATH"
+  local cd_link
+  cd_link=$(make_hyperlink "cd $PROJECT_PATH" "$(make_file_url "$PROJECT_PATH")")
+  echo -e "  ${BLUE}${cd_link}${NC}"
 
-  # Determine the correct simulator based on device type
-  local SIMULATOR_CMD=""
-  case $DEVICE_TYPE in
-    mobile)
-      SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPhone 16 Pro\""
-      ;;
-    tablet)
-      SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPad (10th generation)\""
-      ;;
-    universal)
-      SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPhone 16 Pro\""
-      ;;
-  esac
+  if [ "$APP_TYPE" = "React Native" ]; then
+    local SIMULATOR_CMD=""
+    case $DEVICE_TYPE in
+      mobile)
+        SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPhone 16 Pro\""
+        ;;
+      tablet)
+        SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPad (10th generation)\""
+        ;;
+      universal)
+        SIMULATOR_CMD="npx react-native run-ios --simulator=\"iPhone 16 Pro\""
+        ;;
+    esac
 
-  # Show platform-specific instructions
-  if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
-    echo ""
-    echo "  # For iOS (setup dependencies first):"
-    echo "  cd ios && bundle install && bundle exec pod install && cd .."
-    echo "  $SIMULATOR_CMD"
-    echo ""
-    echo "  # For Android:"
-    echo "  npx react-native run-android"
-  elif [ "$SETUP_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
-    echo "  $SIMULATOR_CMD  # iOS dependencies already installed!"
-  fi
+    if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "false" ]; then
+      echo ""
+      echo "  # For iOS (setup dependencies first):"
+      echo "  cd ios && bundle install && bundle exec pod install && cd .."
+      echo "  $SIMULATOR_CMD"
+      echo ""
+      echo "  # For Android:"
+      echo "  npx react-native run-android"
+    elif [ "$SETUP_IOS" = "true" ] && [ "$RUN_TEST" = "false" ]; then
+      echo "  $SIMULATOR_CMD  # iOS dependencies already installed!"
+    fi
 
-  if [ "$SETUP_ANDROID" = "true" ] && [ "$RUN_TEST" = "false" ]; then
-    echo "  npx react-native run-android"
-  fi
+    if [ "$SETUP_ANDROID" = "true" ] && [ "$RUN_TEST" = "false" ]; then
+      echo "  npx react-native run-android"
+    fi
 
-  if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "true" ]; then
-    echo ""
-    echo "  # To run on iOS later (setup dependencies first):"
-    echo "  cd ios && bundle install && bundle exec pod install && cd .."
-    echo "  $SIMULATOR_CMD"
-  fi
+    if [ "$SETUP_IOS" = "false" ] && [ "$SETUP_ANDROID" = "true" ]; then
+      echo ""
+      echo "  # To run on iOS later (setup dependencies first):"
+      echo "  cd ios && bundle install && bundle exec pod install && cd .."
+      echo "  $SIMULATOR_CMD"
+    fi
 
-  if [ "$SETUP_ANDROID" = "false" ] && [ "$SETUP_IOS" = "true" ]; then
-    echo ""
-    echo "  # To run on Android later:"
-    echo "  npx react-native run-android"
+    if [ "$SETUP_ANDROID" = "false" ] && [ "$SETUP_IOS" = "true" ]; then
+      echo ""
+      echo "  # To run on Android later:"
+      echo "  npx react-native run-android"
+    fi
+  else
+    echo -e "  ${BLUE}npm run dev${NC}  # Start the Vite dev server"
+
+    if [ "$WEB_ARCHETYPE" = "pwa" ]; then
+      echo -e "  ${BLUE}npm run build${NC}"
+      echo -e "  ${BLUE}npm run preview${NC}  # Smoke-test service worker"
+      echo ""
+      echo "  Add app icons to public/pwa-192x192.png and public/pwa-512x512.png before shipping."
+    fi
+
+    if [ "$WEB_MOCKUP_MODE" = "mockup" ]; then
+      echo ""
+      echo "  Customize src/App.jsx and src/components/* to tailor the mockup experience."
+    fi
   fi
 
   echo ""
@@ -821,19 +2093,37 @@ main() {
   print_header
   check_prerequisites
   get_project_name "$1"
+  ask_project_location
+  validate_project_path
   ask_user_preferences
+
+  ensure_vscode_available
 
   echo ""
   echo -e "${BOLD}Starting project creation...${NC}"
   echo ""
 
-  create_react_native_project
-  setup_ios_dependencies
-  install_android_dependencies
-  configure_platform_settings
+  if [ "$APP_TYPE" = "React Native" ]; then
+    create_react_native_project
+    setup_ios_dependencies
+    install_android_dependencies
+    configure_platform_settings
+  else
+    create_react_web_project
+    if [ "$WEB_ARCHETYPE" = "pwa" ]; then
+      setup_web_pwa
+    fi
+    if [ "$WEB_MOCKUP_MODE" = "mockup" ]; then
+      apply_web_mockup_templates
+    fi
+  fi
+
+  cd "$PROJECT_PATH" || exit 1
+  initialize_local_repository
   create_github_repo
   push_to_github
   run_initial_test
+  launch_vscode_dev_server
   print_final_message
 }
 
